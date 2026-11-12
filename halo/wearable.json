@@ -1,0 +1,30 @@
+{
+  "id": "b4cacbf1-13a8-4a9b-b1e6-4bcd2e4c8224",
+  "name": "Emanate Halo Test",
+  "description": "Emanate movement-powers test halo (Zone only).",
+  "rarity": "mythic",
+  "data": {
+    "replaces": [],
+    "hides": [],
+    "tags": [
+      "emanate",
+      "halo",
+      "test"
+    ],
+    "representations": [
+      {
+        "bodyShapes": [
+          "urn:decentraland:off-chain:base-avatars:BaseMale",
+          "urn:decentraland:off-chain:base-avatars:BaseFemale"
+        ],
+        "mainFile": "halo.glb",
+        "contents": [
+          "halo.glb"
+        ],
+        "overrideHides": [],
+        "overrideReplaces": []
+      }
+    ],
+    "category": "top_head"
+  }
+}
