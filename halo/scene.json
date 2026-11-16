@@ -14,7 +14,9 @@
     "email": ""
   },
   "main": "bin/game.js",
-  "requiredPermissions": [],
+  "requiredPermissions": [
+    "USE_FETCH"
+  ],
   "featureToggles": {},
   "scene": {
     "parcels": [

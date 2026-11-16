@@ -1,6 +1,6 @@
 // EMANATE Build 02b: halo movement revamp (Zone). Plain test code, no graphics, no network.
 //
-// Three stacking tiers (key E cycles 1 -> 2 -> 3 -> 1). There is no Normal mode: players start
+// Three stacking tiers plus Normal (0); the server sets the tier (E now places a Discharge Trap). There is no Normal mode: players start
 // with the Sprint Round.
 //   1 SPRINT   boosted run speed from the start
 //   2 JUMP     sprint + a small bump to the normal jump + a LARGE double jump (~10 m); gliding stays
@@ -38,11 +38,13 @@ import {
   PhysicsCombinedForce
 } from '@dcl/sdk/ecs'
 import { Vector3, Color4 } from '@dcl/sdk/math'
+import { emit } from './net'
+import { gameInit, gameUpdate, gameTier, gamePlaceTrap, gameHud, gameCameraTest } from './game'
 import ReactEcs, { UiEntity, Label, ReactEcsRenderer } from '@dcl/sdk/react-ecs'
+import { dialogUi } from './dialog'
 
-type Tier = 1 | 2 | 3
-const TIERS: Tier[] = [1, 2, 3]
-const TIER_NAMES: Record<Tier, string> = { 1: 'SPRINT', 2: 'JUMP', 3: 'FLYING' }
+type Tier = 0 | 1 | 2 | 3 // 0 normal (no powers), 1 Speed, 2 Jump, 3 Fly: the server decides the tier (round level, a Halo boost, a Discharge Trap hit)
+const TIER_NAMES: Record<Tier, string> = { 0: 'NORMAL', 1: 'SPRINT', 2: 'JUMP', 3: 'FLYING' }
 
 // ---- tunables (adjust from the Zone measurements) ----
 // Tier 1: sprint (normal: jog 8, run 10). Target run 15-25 m/s.
@@ -52,7 +54,7 @@ const JUMPS = { jumpHeight: 1.6, runJumpHeight: 2.2, doubleJumpHeight: 9 } // do
 // Tier 3: Flying. Constant drift-down while the glider is open (a falling feather is ~0.5-1 m/s).
 const FLY_SINK = 0.3 // glidingFallingSpeed, m/s
 // Boost = a SUSTAINED FORCE while F is held, along the camera look direction (pitch included).
-// Real Unity values (CharacterControllerSettings.asset, from the Unity client): Gravity -10, JumpGravityFactor 4
+// Real Unity values (CharacterControllerSettings.asset, from Desktop): Gravity -10, JumpGravityFactor 4
 // (gravity x4 = 40 m/s^2 while moving UP), GlideWindResponse 1.5 (continuous forces x1.5 while gliding),
 // CharacterMass 1, ExternalEnvDrag 0.5. Vertical: net accel = F.y*1.5 - gravity, so holding height while
 // falling needs F.y ~ 6.7 (10/1.5) and KEEPING a climb going needs F.y ~ 26.7 (40/1.5). Horizontal
@@ -68,7 +70,7 @@ const DIVE_MAX = 16.2 // m/s: the dive force fades to 0 as the descent rate reac
 const DIVE_SINK = 20.3 // glidingFallingSpeed while diving (look down + F): lets the glider clamp allow a fast descent
 const FWD_FORCE = 22 // horizontal force at level pitch (scaled by cos(pitch)); x1.5 while gliding
 const CEILING = 200 // m: the most other players can see
-// ---- Build 02d limits (1 s averages as the Synth sees them; design targets) ----
+// ---- Build 02d limits (1 s averages as the Synth sees them; Forces's numbers) ----
 const SPEED_CAP = 24.3 // m/s TOTAL speed in every tier and combination (02f: -10% from 27); a brake force enforces it
 const BRAKE = 40 // opposing force while over the cap
 const H_MAX = 19.2 // m/s top HORIZONTAL speed (02f: -10% from 21.3): thrust and the carry fade out toward it, and a brake holds it
@@ -86,6 +88,7 @@ const BRAKE_SOURCE = engine.addEntity()
 const AIR_SOURCE = engine.addEntity()
 
 let tier: Tier = 1
+let baseTier: Tier = 1
 let logTimer = 0
 let hudTimer = 0
 let prevPos: Vector3 | undefined
@@ -124,24 +127,36 @@ function setTier(next: Tier) {
   Physics.removeForceFromPlayer(AIR_SOURCE)
   airborne = false
   console.log(`[halo] TIER -> ${tier} ${TIER_NAMES[tier]}`)
+  emit('tier', { tier, name: TIER_NAMES[tier] })
 }
 
 // Tiers stack: each keeps everything from the one before.
 // ---- on-screen diagnostic readout (so we can SEE what the game delivers to the wearable) ----
 let hudText = 'halo: starting...'
 function hudUi() {
+  const d = dialogUi()
   return ReactEcs.createElement(
     UiEntity,
-    {
-      uiTransform: { positionType: 'absolute', position: { top: '14%', left: '1%' }, width: 460, height: 118 },
-      uiBackground: { color: Color4.create(0, 0, 0, 0.55) }
-    },
-    ReactEcs.createElement(Label, { value: hudText, fontSize: 14, textAlign: 'top-left', color: Color4.White() })
+    { uiTransform: { positionType: 'absolute', position: { top: 0, left: 0 }, width: '100%', height: '100%', pointerFilter: 'none' } },
+    ReactEcs.createElement(
+      UiEntity,
+      {
+        uiTransform: { positionType: 'absolute', position: { top: '42%', left: '1%' }, width: 720, height: 270, pointerFilter: 'none' },
+        uiBackground: { color: Color4.create(0, 0, 0, 0.55) }
+      },
+      ReactEcs.createElement(Label, { value: hudText, fontSize: 14, textAlign: 'top-left', color: Color4.White() })
+    ),
+    d
   )
 }
 let diving = false // set each frame by the boost code: F held and looking down
 
 function applySettings() {
+  if (tier === 0) {
+    // normal: no powers (a Discharge Trap hit on a level-1 player): the client's own locomotion defaults
+    AvatarLocomotionSettings.deleteFrom(engine.PlayerEntity)
+    return
+  }
   const settings: Record<string, number> = { ...SPRINT, hardLandingCooldown: LAND_COOLDOWN }
   if (tier >= 2) {
     Object.assign(settings, JUMPS)
@@ -166,10 +181,17 @@ function halo(dt: number) {
   for (const [action, name] of ACTIONS) {
     if (inputSystem.isTriggered(action, PointerEventType.PET_DOWN)) {
       console.log(`[halo] INPUT down ${name}`)
+      emit('key', { key: name })
     }
   }
   if (inputSystem.isTriggered(InputAction.IA_PRIMARY, PointerEventType.PET_DOWN)) {
-    setTier(TIERS[(TIERS.indexOf(tier) + 1) % TIERS.length])
+    // E: place a Discharge Trap where you stand (one at a time). Halo boosts now apply the moment they are picked up, so E no longer uses an upgrade or cycles the tier.
+    if (inputSystem.isPressed(InputAction.IA_SECONDARY)) gameCameraTest() // F held + E: the camera tests
+    else gamePlaceTrap()
+  }
+  {
+    const want = gameTier(baseTier)
+    if (want !== tier) setTier(want)
   }
 
   // ---- reapply settings every frame ----
@@ -295,6 +317,11 @@ function halo(dt: number) {
     } else {
       Physics.removeForceFromPlayer(AIR_SOURCE)
     }
+    try {
+      gameUpdate(dt, Vector3.create(t.position.x, t.position.y, t.position.z), hSm, airborne, tier, vy)
+    } catch (e) {
+      emit('error', { where: 'gameUpdate', msg: String(e), stack: String((e as any)?.stack ?? '').slice(0, 400) })
+    }
     prevPos = Vector3.create(t.position.x, t.position.y, t.position.z)
     maxHeight = Math.max(maxHeight, t.position.y)
     maxSpeed = Math.max(maxSpeed, speed)
@@ -312,7 +339,9 @@ function halo(dt: number) {
 ` +
         `speed: ${hSm.toFixed(1)} h, ${vySm.toFixed(1)} v, ${Vector3.length(velSm).toFixed(1)} total m/s (smoothed)   air: ${airborne ? 'yes' : 'no'}
 ` +
-        `glideFall limit: ${diving ? DIVE_SINK : FLY_SINK} m/s   land cooldown: ${LAND_COOLDOWN}s   camera: ${Transform.getOrNull(engine.CameraEntity) ? 'read' : 'NOT readable'}`
+        `glideFall limit: ${diving ? DIVE_SINK : FLY_SINK} m/s   land cooldown: ${LAND_COOLDOWN}s   camera: ${Transform.getOrNull(engine.CameraEntity) ? 'read' : 'NOT readable'}
+` +
+        gameHud(0)
     }
     logTimer += dt
     if (logTimer >= 0.5) {
@@ -328,11 +357,13 @@ function halo(dt: number) {
 }
 
 export function main() {
-  console.log('[halo] loaded. E cycles tier 1>2>3. Tier 3: HOLD jump to keep the glider open, HOLD F to thrust along the camera look direction (pitch included).')
+  console.log('[halo] loaded. E places a Discharge Trap. Tier 3: HOLD jump to keep the glider open, HOLD F to thrust along the camera look direction (pitch included).')
   try {
     ReactEcsRenderer.setUiRenderer(hudUi)
   } catch (e) {
     console.log('[halo] HUD unavailable: ' + e)
   }
   engine.addSystem(halo, 0, 'emanate-halo')
+  emit('loaded', { build: '04' })
+  gameInit()
 }
