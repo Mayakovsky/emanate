@@ -406,27 +406,9 @@ The reward system has two halves: the mechanics (the halo and its upgrades) and 
 | Full fee all year | 52 items × $25 | $1,300 |
 | Halo (one item) | 1 × $5 or $25 | $5 or $25 |
 
-The $5 rate is a temporary Foundation discount on the $25 fee, so the real total depends on when we launch.
+## Appendix G. Where the code runs
 
-## Appendix G. Where the code runs and hosting
-
-All visual effects are drawn on each player's own computer by the halo. Our server only sends information (where the Synth is, which round it is, who has which upgrade), so it needs no graphics card.
-
-| Part | Where it runs | What we provide |
-|---|---|---|
-| Halo code: dots, effects, boosts, sky, camera moves, third-person glimpse | Each player's computer, inside their DCL app | Nothing to host: published as a wearable on DCL's servers |
-| Halo 3D model and reward wearables | DCL's servers and Polygon | Publishing fees only |
-| The Synth's avatar (Bevy) | Our server | Linux, no graphics card |
-| Orchestration layer: roaming, approach, trust, rift | Our server | Same server |
-| Game server: match state, positions, upgrades, dead-zone map, data to halos | Our server | Same server, plus a web address with HTTPS (the secure connection halos use) |
-| Player memory and points (database) | Our server | Same server |
-| Pre-made audio and images | Our server | Loaded by the halo from a web address |
-| AI conversations | An AI provider, called from our server | Pay per conversation |
-| Rewards, notifications, Exploration Games, public stats | DCL's servers | Access from the ask list |
-
-The Synth and the game server run on one small Linux server with no graphics card. If DCL picks the game up, it can move to DCL's servers.
-
-`TBD:` hosting cost line.
+Our server runs the game state. All visual effects are drawn on each player's own computer by the halo, so the server only sends information (where the Synth is, which round it is, who has which upgrade) and needs no graphics card.
 
 ## Appendix H. Ask list for DCL
 
