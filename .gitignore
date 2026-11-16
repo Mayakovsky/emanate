@@ -18,3 +18,6 @@ records/
 __pycache__/
 *.pyc
 cursor.config
+
+# the local-only game server must never be added to this public repo
+game-server/
