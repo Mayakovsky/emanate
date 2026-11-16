@@ -21,3 +21,14 @@ cursor.config
 
 # the local-only game server must never be added to this public repo
 game-server/
+
+# local-only and sensitive material (EMANATE-PUSH-POLICY): never in this repo
+deploy/vps/
+docs/
+data/
+halo-upload/
+emanate-data/
+GenesisTrees.bin
+*.token
+*secret*
+logs/
