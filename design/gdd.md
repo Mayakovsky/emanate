@@ -463,16 +463,16 @@ Zone is DCL's empty test copy of the city. Each item comes from reading DCL's co
 - [x] Momentum jumps feel right (accepted by Forces as test pilot)
 - [x] Landing recovery at a third of Unity's (0.25 s set; accepted by feel)
 - [x] The Synth's tracking holds when the player is high or far away (with following: 100% coverage)
-- [ ] Tracking arrows: readable on the ground and in the air, in first and third person
+- [x] Tracking arrows: red arrows readable on the ground in the real client (in the air, and in first and third person, still to check)
 - [ ] Dead-zone warning fires early enough at flight speed
 - [ ] The endgame plume reads from across the city and reaches the ceiling
 - [ ] What happens when a scene that keeps rewriting movement collides with the halo doing the same
-- [x] The halo places effects at fixed spots in the city (the lobby dome and a trap, seen in the real client)
+- [x] The halo places effects at fixed spots in the city (the lobby dome and its burst at the end of the timer, and a trap, seen in the real client)
 - [ ] The halo attaches effects to other players' avatars (needs a second account)
 - [ ] The halo sets the time of day; sky effects render below 330 m
 - [ ] The halo drives the new SDK 7.32 sky controls (Skybox, Sun, Fog) for the cinematics
 - [ ] A collaborator can preview the halo on Zone from our collection
-- [ ] Bird's-eye camera above a distant spot: how it looks with low-detail stand-ins
+- [x] Bird's-eye camera lift over the city seen in the real client (how it looks with low-detail stand-ins is still to check)
 - [ ] Third-person glimpse: camera behind and above the Synth and back, with the stand-in figure when the Synth is too far to draw
 - [ ] What happens to the camera moves when the player stands in a scene that locks its own camera
 - [ ] Halo state restored from the server after a dead zone unloads it
@@ -483,6 +483,7 @@ Zone is DCL's empty test copy of the city. Each item comes from reading DCL's co
 - [ ] Whether the nametag shows through walls on desktop (mobile hides it; wearables don't hide it on either)
 - [x] How much memory Bevy uses while loading scenes: peak 1.8 GB, so the 4 GB plan
 - [ ] Whether guest accounts can receive and run the halo
+- [x] A group start can throw every player in the bubble across the map (teleport), the Synth placed 100 to 300 m from the new group, tested with one real player and two stand-in halos in Coop (off by default)
 - [x] The permission prompt lists a single line ("Use the Fetch API"), checked in the real client on Zone
 - [ ] Rewards delivery of the halo
 - [ ] The halo model passes `top_head` curation within 500 triangles (a pre-check with the curation committee)
