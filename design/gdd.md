@@ -484,6 +484,8 @@ Zone is DCL's empty test copy of the city. Each item comes from reading DCL's co
 - [x] How much memory Bevy uses while loading scenes: peak 1.8 GB, so the 4 GB plan
 - [ ] Whether guest accounts can receive and run the halo
 - [x] A group start can throw every player in the bubble across the map (teleport), the Synth placed 100 to 300 m from the new group, tested with one real player and two stand-in halos in Coop (off by default)
+- [x] The Synth hides on rooftops: in the real city's setup, 4 of 8 approaches ended with it on a roof 5 to 12 m up
+- [x] The key-4 plume draws in the real client as a column of red, orange and dark puffs (flat shapes, not yet smoke; reading from across the city not yet checked)
 - [x] The permission prompt lists a single line ("Use the Fetch API"), checked in the real client on Zone
 - [ ] Rewards delivery of the halo
 - [ ] The halo model passes `top_head` curation within 500 triangles (a pre-check with the curation committee)
