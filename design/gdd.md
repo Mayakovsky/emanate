@@ -18,7 +18,7 @@
 |---|---|
 | **Player promise** | You hunt an AI avatar, the Synth, across Genesis City using a free halo's on-demand arrows and powers, while it hides on other people's land. |
 | **Primary player** | A desktop Decentraland player who already explores the city and likes a chase: curious, happy to wear a free wearable and approve its permission prompt, playing alone or with a few friends in sessions of about 20 to 40 minutes. |
-| **Current status** | Core-mechanic prototype. The halo's movement powers (sprint, jump, glide, fly) work and are tuned on Zone, DCL's staging copy of the city. The Synth runs as a real avatar there: it walks, runs and jumps with the same numbers as the players at each power level, plans routes around buildings and up stairs, hides on high or low ground, and glides away. The game server holds the rules for Solo, Coop and team play (the lobby, the Charge steps, the rounds, plumes, upgrades and the Discharge Trap). The halo's tracking arrows, plumes, warnings and charging effects are built in a test build that has not yet been tried by a group on Zone. Playable link: there is no public link yet. A guided session on Zone is available on request; at launch there will be a jump-in link to the Genesis City start location plus the halo's wearable page, once DCL approves. |
+| **Current status** | Core-mechanic prototype. The halo's movement powers (sprint, jump, glide, fly) work and are tuned on Zone, DCL's staging copy of the city. The Synth runs as a real avatar there: it walks, runs and jumps with the same numbers as the players at each power level, plans routes around buildings and up stairs, hides on high or low ground, and glides away. The game server holds the rules for Solo, Coop and team play (the lobby, the Charge steps, the rounds, plumes, upgrades and the Discharge Trap). The halo's tracking arrows, plumes, warnings and charging effects are built in a test build that has not yet been tried by a group on Zone. In the real client on Zone one tester has checked that the halo's permission prompt lists a single line, that it reaches our server over HTTPS, that the Discharge Trap places and triggers, that the unpowered glide works (measured), and that the scene teleport call (movePlayerTo) is allowed. Playable link: there is no public link yet. A guided session on Zone is available on request; at launch there will be a jump-in link to the Genesis City start location plus the halo's wearable page, once DCL approves. |
 | **Requested round** | V0 |
 | **Live at end of the round** | The free halo, the roaming Synth and Solo play, served from one small server of ours, subject to DCL's approvals for the halo's powers and the Synth's account (Section 9). Coop and team play follow in later weeks. |
 
@@ -467,7 +467,8 @@ Zone is DCL's empty test copy of the city. Each item comes from reading DCL's co
 - [ ] Dead-zone warning fires early enough at flight speed
 - [ ] The endgame plume reads from across the city and reaches the ceiling
 - [ ] What happens when a scene that keeps rewriting movement collides with the halo doing the same
-- [ ] The halo places effects at fixed spots in the city, and attaches effects to other players' avatars
+- [x] The halo places effects at fixed spots in the city (the lobby dome and a trap, seen in the real client)
+- [ ] The halo attaches effects to other players' avatars (needs a second account)
 - [ ] The halo sets the time of day; sky effects render below 330 m
 - [ ] The halo drives the new SDK 7.32 sky controls (Skybox, Sun, Fog) for the cinematics
 - [ ] A collaborator can preview the halo on Zone from our collection
@@ -475,10 +476,13 @@ Zone is DCL's empty test copy of the city. Each item comes from reading DCL's co
 - [ ] Third-person glimpse: camera behind and above the Synth and back, with the stand-in figure when the Synth is too far to draw
 - [ ] What happens to the camera moves when the player stands in a scene that locks its own camera
 - [ ] Halo state restored from the server after a dead zone unloads it
+- [x] The halo reaches our server over HTTPS from the real client, and a scene call (movePlayerTo) is allowed without a prompt
+- [x] The unpowered glide measured in the real client: sink about 1.0 m/s (not 0.3), horizontal 5.6 m/s at a walk; lifts to 100, 150 and 200 m work
 - [x] The Synth's server-run app collides with real buildings and can jump and glide (Build 01)
 - [ ] Synth profile republish (partly done: the name shows to nearby players; timing and acceptance rate not yet measured)
 - [ ] Whether the nametag shows through walls on desktop (mobile hides it; wearables don't hide it on either)
 - [x] How much memory Bevy uses while loading scenes: peak 1.8 GB, so the 4 GB plan
 - [ ] Whether guest accounts can receive and run the halo
-- [ ] Rewards delivery of the halo, and the permission prompt with a single line
+- [x] The permission prompt lists a single line ("Use the Fetch API"), checked in the real client on Zone
+- [ ] Rewards delivery of the halo
 - [ ] The halo model passes `top_head` curation within 500 triangles (a pre-check with the curation committee)
