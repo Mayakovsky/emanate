@@ -1,6 +1,8 @@
 // EMANATE Build 04: visuals and sounds (placeholders). Everything here is drawn by the wearer's own client, so arrows are
 // wearer-only by construction; plumes are drawn for every player from the server's list.
-import { engine, Transform, MeshRenderer, Material, AudioSource, MaterialTransparencyMode, MainCamera, VirtualCamera, type Entity } from '@dcl/sdk/ecs'
+import { engine, Transform, MeshRenderer, Material, AudioSource, MaterialTransparencyMode, MainCamera, VirtualCamera, ParticleSystem, Raycast, RaycastResult, RaycastQueryType, ColliderLayer, type Entity } from '@dcl/sdk/ecs'
+import { type ParticlePlan, type Emitter, dropOldest } from './particleplan'
+import { RAY_UP, RAY_MAX, chevronY, followY } from './groundplan'
 import { Vector3, Quaternion, Color4 } from '@dcl/sdk/math'
 import { SLOT_TABLE, SLOT_LOOP } from './audioSlots'
 import { PACKED } from './audioPacked'
@@ -149,6 +151,7 @@ export interface ArrowRun {
 }
 export class Arrows {
   runs: Record<ArrowKind, ArrowRun>
+  private rays = new Map<string, { e: Entity; y: number | null }>() // c24f: one downward ray per chevron (created only when fx.arrowGround is on)
   constructor() {
     const mk = (kind: ArrowKind): ArrowRun => ({ kind, ch: new ArrowChannel(), target: null, phase: 0, mode: 'arrow', sputterUntil: 0, chevrons: null })
     this.runs = { red: mk('red'), pink: mk('pink'), white: mk('white'), purple: mk('purple'), yellow: mk('yellow') }
@@ -193,7 +196,19 @@ export class Arrows {
       for (let i = 0; i < chevs.length; i++) {
         const t = Transform.getMutable(chevs[i].root)
         const o = offs[i] ?? { s: 0, fade: 0 }
-        t.position = Vector3.create(me.x + fwd.x * o.s, me.y + 0.06, me.z + fwd.z * o.s) // flat at foot level (no ground following; Forces judges slopes)
+        const px = me.x + fwd.x * o.s, pz = me.z + fwd.z * o.s
+        let y = me.y + 0.06 // flat at foot level (the c24e behaviour)
+        if (FXS.arrowGround > 0) { // c24f candidate: a ray straight down from each chevron gives the ground under it; no hit keeps it flat (groundplan.ts)
+          const key = k + i
+          let ray = this.rays.get(key)
+          if (!ray) { ray = { e: engine.addEntity(), y: null }; this.rays.set(key, ray); Transform.create(ray.e, { position: Vector3.create(px, me.y + RAY_UP, pz) }); Raycast.create(ray.e, { direction: { $case: 'globalDirection', globalDirection: Vector3.create(0, -1, 0) }, maxDistance: RAY_MAX, queryType: RaycastQueryType.RQT_HIT_FIRST, continuous: true, collisionMask: ColliderLayer.CL_PHYSICS }) }
+          Transform.getMutable(ray.e).position = Vector3.create(px, me.y + RAY_UP, pz)
+          const res = RaycastResult.getOrNull(ray.e)
+          const hit = res && res.hits && res.hits.length > 0 ? res.hits[0]!.length : null
+          ray.y = followY(ray.y, chevronY(me.y, hit), dt)
+          y = ray.y
+        }
+        t.position = Vector3.create(px, y, pz)
         t.rotation = rot
         const sc = 1.3 * o.fade
         t.scale = sc > 0.02 ? Vector3.create(sc, sc, sc) : HIDDEN
@@ -1002,5 +1017,43 @@ export class FxLib {
       }
     }
   }
+}
+
+// ---------------- c24f candidate (NOT FINAL): the `particles` command (plans come from particleplan.ts: validated, capped) ----------------
+interface PartItem { born: number; end: number; entities: Entity[] }
+export class ParticleFx {
+  items: PartItem[] = []
+  get emitterCount() { return this.items.reduce((a, i) => a + i.entities.length, 0) }
+  spawn(plan: ParticlePlan, at: Vec, now: number): boolean {
+    const drop = dropOldest(this.items.map((i) => i.entities.length), plan.emitters.length)
+    for (let i = 0; i < drop; i++) this.remove(this.items[0]!)
+    const entities: Entity[] = []
+    for (const em of plan.emitters) {
+      const e = engine.addEntity()
+      Transform.create(e, { position: Vector3.create(at.x + em.dx, at.y + em.dy, at.z + em.dz) })
+      ParticleSystem.create(e, this.component(em))
+      entities.push(e)
+    }
+    this.items.push({ born: now, end: now + plan.seconds, entities })
+    return true
+  }
+  private component(em: Emitter): any {
+    const c4 = (c: number[]) => Color4.create(c[0]!, c[1]!, c[2]!, c[3]!)
+    const shape = em.shape.kind === 'cone' ? { $case: 'cone', cone: { angle: em.shape.angle, radius: em.shape.radius } } : em.shape.kind === 'box' ? { $case: 'box', box: { size: Vector3.create(em.shape.x, em.shape.y, em.shape.z) } } : { $case: 'point', point: {} }
+    const out: any = {
+      active: true, rate: em.rate, maxParticles: em.maxParticles, lifetime: em.lifetime, gravity: em.gravity,
+      initialSize: { start: em.sizeMin, end: em.sizeMax }, sizeOverTime: { start: em.sizeOverStart, end: em.sizeOverEnd },
+      initialColor: { start: c4(em.colorMin), end: c4(em.colorMax) }, colorOverTime: { start: c4(em.fadeStart), end: c4(em.fadeEnd) },
+      initialVelocitySpeed: { start: em.speedMin, end: em.speedMax }, blendMode: em.blend === 'add' ? 1 : 0, billboard: true, shape, simulationSpace: 1
+    }
+    if (em.textured) out.texture = { tex: { $case: 'texture', texture: { src: 'images/puff.png' } } } // inside the zip: the only place a wearable's texture can come from
+    return out
+  }
+  private remove(it: PartItem) {
+    for (const e of it.entities) engine.removeEntity(e)
+    const i = this.items.indexOf(it); if (i >= 0) this.items.splice(i, 1)
+  }
+  update(now: number) { for (const it of [...this.items]) if (now >= it.end) this.remove(it) }
+  clear() { for (const it of [...this.items]) this.remove(it) } // the kill switch (feature particles off, or idle)
 }
 const clamp01 = (v: number) => (Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0)

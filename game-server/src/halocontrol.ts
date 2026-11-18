@@ -6,7 +6,7 @@
 //   policy    refuse (or serve older behaviour to) a halo whose protocol version is below minPv
 export const SERVER_PROTOCOL = 1
 const SECTIONS = new Set(['power', 'rules', 'fx', 'features', 'text', 'sounds', 'tick'])
-const COMMANDS = new Set(['hud', 'sound', 'fx', 'push', 'lift', 'teleport', 'tick', 'feature', 'idle', 'settings'])
+const COMMANDS = new Set(['hud', 'sound', 'fx', 'push', 'lift', 'teleport', 'tick', 'feature', 'idle', 'settings', 'probe', 'particles'])
 const MAX_QUEUE = 40
 
 export interface HaloPolicy { minPv: number; message: string }
@@ -40,6 +40,10 @@ export class HaloControl {
   command(to: string, cmd: any): boolean {
     if (!cmd || typeof cmd !== 'object' || typeof cmd.c !== 'string' || !COMMANDS.has(cmd.c)) return false
     const clean = JSON.parse(JSON.stringify(cmd))
+    if (cmd.c === 'particles') { // c24f candidate: refuse what the halo would only ignore (an unknown kind, a non-numeric number); the halo clamps the rest
+      if (!['fire', 'smoke', 'sparks'].includes(cmd.kind)) return false
+      for (const k of ['x', 'y', 'z', 'size', 'seconds', 'height', 'n', 'width']) if (cmd[k] !== undefined && !(typeof cmd[k] === 'number' && Number.isFinite(cmd[k]))) return false
+    }
     if (JSON.stringify(clean).length > 600) return false
     const targets = to === 'all' ? [...this.sawPlayers] : [to.toLowerCase()]
     for (const id of targets) {

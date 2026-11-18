@@ -6,7 +6,7 @@
 import { RULES } from './logic'
 
 export const PROTOCOL_VERSION = 1 // the command vocabulary and settings schema this halo understands
-export const BUILD_ID = 'c24e' // the halo build (set at release; the server logs it and may refuse an old one)
+export const BUILD_ID = 'c24f' // the halo build (set at release; the server logs it and may refuse an old one)
 
 // ---- the powers (index.ts) ----
 export const POWER = {
@@ -24,10 +24,11 @@ export const FXS = {
   plumeRed: 1, plumeOrange: 1, plumeSmoke: 0.35, // relative number of red, orange and smoke puffs
   riftSeconds: 3, riftRadius: 14, // the Rift opening effect at the lobby end
   liftAltitudes: 4, // how many lift targets (informational)
+  particleTexture: 0, arrowGround: 0, // c24f candidate: particles use images/puff.png when 1 (default 0: squares); chevrons follow the ground by raycast when 1 (default 0: flat)
   gliderPrompt: 1, gliderPromptSeconds: 4 // show the "hold JUMP to open the glider" line for this long after a tier-3 wearer leaves the ground
 }
 // ---- features: 1 on, 0 off ----
-export const FEATURES = { arrows: 1, plumes: 1, trap: 1, deadzoneWarn: 1, cinematics: 1, bubbleFx: 1, sounds: 1, debugPanel: 1, powers: 1, notes: 1, activeLine: 1 }
+export const FEATURES = { arrows: 1, plumes: 1, trap: 1, deadzoneWarn: 1, cinematics: 1, bubbleFx: 1, sounds: 1, debugPanel: 1, powers: 1, notes: 1, activeLine: 1, particles: 1 }
 // ---- text (HUD notes and the always-on line) ----
 export const TEXT: Record<string, string> = {
   activeLine: 'EMANATE halo active: sends your position to emanate.hiddenforces.net (see /privacy)',
@@ -55,6 +56,7 @@ const LIMITS: Record<string, [number, number]> = {
   'power.fyHold': [0, 15], 'power.fyRising': [0, 40], 'power.fyEase': [0, 40], 'power.climbForce': [0, 60], 'power.climbMax': [1, 30], 'power.diveForce': [0, 60], 'power.diveMax': [1, 30], 'power.fwdForce': [0, 60],
   'power.ceilingTaper': [5, 100], 'power.diveBrakeStart': [5, 40], 'power.diveBrake': [0, 40], 'power.jumpBonus': [0, 1], 'power.airImpulse': [0, 1], 'power.airCarryK': [0, 2],
   'tick.everySec': [0.1, 5], 'tick.idlePollSec': [10, 3600],
+  'fx.particleTexture': [0, 1], 'fx.arrowGround': [0, 1],
   'fx.plumePuffs': [4, 48], 'fx.chevrons': [2, 10], 'fx.plumeHeight': [10, 250], 'fx.plumeRise': [1, 30],
   'rules.plumeSeconds': [1, 60], 'rules.plumesPerRound': [0, 20], 'rules.boostSeconds': [1, 120]
 }

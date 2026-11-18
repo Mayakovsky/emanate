@@ -77,7 +77,9 @@ export function parseSync(j: any): Sync | null {
   if (j.events != null) {
     if (!Array.isArray(j.events) || j.events.length > 200) return null
     for (const e of j.events) {
-      if (!e || typeof e !== 'object' || typeof e.event !== 'string' || JSON.stringify(e).length > (e.event === 'nav_spots' ? 262_144 : 8192)) return null // the reachable-spot list is the one big event (about 100 KB)
+      if (!e || typeof e !== 'object' || typeof e.event !== 'string') return null
+      // an oversize event (a diagnostic such as nav_probe is tens of KB) is DROPPED, not the whole sync: one big event must never block the Synth's position and commands (found 18 Nov: a probe made every sync fail with 400)
+      if (JSON.stringify(e).length > (e.event === 'nav_spots' ? 262_144 : 8192)) continue // the reachable-spot list is the one big event the server uses (about 100 KB)
       events.push(e)
     }
   }

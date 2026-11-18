@@ -13,7 +13,7 @@ import { ParcelSet, nearestEmptyParcel } from './geo.ts'
 import { simSynth, tailWslSynth, sendSynthCommand, setSynthTransport } from './synthfeed.ts'
 import { BridgeHub, parseSync } from './bridge.ts'
 import { RateLimiter, clientIp, safeEqual, cleanTick, BODY_CAP, DEFAULT_BODY_CAP, routePath, decodeSegment, publicBase } from './security.ts'
-import { planRift } from './rift.ts'
+import { planRift, RIFT_STEP_MS } from './rift.ts'
 import { SynthBrain, lookForRound, noWorld, type World } from './synthai.ts'
 import { exposureFactor } from './hiding.ts'
 import { buildManifest, readAudioFile } from './audioserve.ts'
@@ -388,12 +388,16 @@ export function startServer(port = PORT, match: Match = makeMatch((process.env.E
       lastRound = m.round
       sendSynthCommand({ cmd: 'wear', items: lookForRound(m.round) })
     } else if (m.round !== lastRound) lastRound = m.round
+    // round 24: when a Rift opens this tick, the Synth first steps into it (rift.ts steps, about 3.5 s) and only then goes to the position the match chose (a lobby end places it for the round);
+    // an ending's Synth is parked at a safe spot afterwards. The Synth must never be left far away in a dense area (a long stay 600 m off froze the scene runtime on the OVH box).
+    const riftsNow = m.rifts.splice(0)
+    const riftDelayMs = riftsNow.length ? RIFT_STEP_MS : 0
     for (const t of m.synthTeleports.splice(0)) {
       brain.reset()
-      if (realSynth()) sendSynthCommand({ cmd: 'move', x: t.x, y: m.synth.y, z: t.z })
+      if (realSynth()) { const mv = { cmd: 'move', x: t.x, y: m.synth.y, z: t.z }; if (riftDelayMs) setTimeout(() => sendSynthCommand(mv as any), riftDelayMs).unref(); else sendSynthCommand(mv as any) }
     }
-    for (const r of m.rifts.splice(0)) {
-      // round 24: the Rift at the trigger (see rift.ts): the halo draws the portal and the smoke column; the Synth steps into it and is gone
+    for (const r of riftsNow) {
+      // the Rift at the trigger (see rift.ts): the halo draws the portal and the smoke column; the Synth steps into it and is gone
       const plan = planRift(r, Number(halo.overrides.power?.ceiling ?? 200))
       for (const c of plan.halo) halo.command('all', c)
       m.note('rift', { kind: r.kind, x: Math.round(plan.centre.x), y: Math.round(plan.centre.y), z: Math.round(plan.centre.z) })

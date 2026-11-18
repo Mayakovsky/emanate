@@ -6,8 +6,10 @@ import { getPlayer } from '@dcl/sdk/players'
 import { getUserData } from '~system/UserIdentity'
 import { skyUpdate, skyText, skyStart } from './sky'
 import { openDialog, closeDialog, setDialogClock, dialog } from './dialog'
-import { FxLib, playLib, FX_KINDS, Arrows, Plumes, ChargeArcs, DropMarkers, TrapMarkers, BubbleFx, RiftFx as BurstRiftFx, TestMarkers, EndgameFx, SkyDome, StandIn, RiftFx, AuroraFx, DistanceMarkers, CameraTests, MARKER_COLOR_NAMES, MARKER_DISTANCES, initSounds, playSlot, playSound, soundsUpdate, setRemoteAudio, audioStats, slotSource } from './fx'
+import { planParticles } from './particleplan'
+import { ParticleFx, FxLib, playLib, FX_KINDS, Arrows, Plumes, ChargeArcs, DropMarkers, TrapMarkers, BubbleFx, RiftFx as BurstRiftFx, TestMarkers, EndgameFx, SkyDome, StandIn, RiftFx, AuroraFx, DistanceMarkers, CameraTests, MARKER_COLOR_NAMES, MARKER_DISTANCES, initSounds, playSlot, playSound, soundsUpdate, setRemoteAudio, audioStats, slotSource } from './fx'
 import { idle, setIdle, refetchSettings, cmdQueue, settingsInfo, refusedNote, emit, netUpdate, sendGameEvent, serverState, serverUp, probeWebSocket, probeAll, probeText, lastErr, netStatus, lastGameError, manifestUpdate, manifestInfo } from './net'
+import { probeTick, probeRun, PROBE } from './probe'
 import { FXS, TICK, applyRemote, feature, say, PROTOCOL_VERSION } from './settings'
 import {
   ArrowChannel, PlumeBudget, Warnings, pressRed, pressPink, RULES, TEST_TARGETS, testMovingSynth, testDeadZoneDistance, dist, nearest, type Vec, type Target
@@ -43,6 +45,7 @@ let testReplays = 0
 let idReady = false
 let serverReplayOpen = false
 const rift = new RiftFx()
+const particleFx = new ParticleFx()
 const aurora = new AuroraFx()
 let cine = 0 // 0 off, 1 the Rift, 2 the aurora, 3 Carrington (test mode: hold F + press 3; server mode: round ends)
 let cineStart = 0
@@ -208,12 +211,14 @@ id ${myId.slice(0, 12)}${idReady ? '' : ' (not stable)'}
 pos local (${curMe.x.toFixed(1)}, ${curMe.y.toFixed(1)}, ${curMe.z.toFixed(1)}) world (${(curMe.x + ORIGIN.x).toFixed(1)}, ${(curMe.z + ORIGIN.z).toFixed(1)})
 net ${ns.up ? 'UP' : 'down'} fails=${ns.failCount} ${ns.lastErr}
 ${probeText}
+${PROBE}
 ${skyText}
 ${round}   keys: 1 red ${cd('red')}  2 pink ${cd('pink')}  3 dead-zone ${warnings.deadZoneEnabled ? 'ON' : 'off'} ${cd('white')}  4 plumes ${left}   E trap ${hasTrap ? 'DOWN' : 'ready'}   boost ${boostLeft > 0 ? boostLeft.toFixed(0) + 's' : '-'}${trapLeft > 0 ? '   TRAPPED ' + trapLeft.toFixed(0) + 's' : ''}   ${lastEventNote}`
 }
 
 // ---- the per-frame update; me = the wearer's scene-local position ----
 export function gameUpdate(dt: number, me: Vec, speed: number, airborne: boolean, tier: number, vy: number) {
+  probeTick(dt, me)
   if (!started) return
   clock += dt
   if (idle) {
@@ -364,6 +369,7 @@ export function gameUpdate(dt: number, me: Vec, speed: number, airborne: boolean
   prevMe = { x: me.x, y: me.y, z: me.z }
   arrows.update(dt, clock, { x: me.x + velSmooth.x * 0.05, y: me.y, z: me.z + velSmooth.z * 0.05 }) // arrows are drawn in scene-local space at the feet
   fxLib.update(clock)
+  if (!feature('particles')) particleFx.clear(); else particleFx.update(clock)
   gliderPrompt(airborne, tier)
   syncPlumes(me)
   syncTraps(me, world)
@@ -987,6 +993,15 @@ const num = (x: unknown, d: number) => (typeof x === 'number' && Number.isFinite
 function runCommand(c: Record<string, unknown>) {
   if (typeof c.v === 'number' && c.v > PROTOCOL_VERSION) return
   switch (c.c) {
+    case 'particles': { // c24f candidate: { kind: fire|smoke|sparks, x,y,z (world) | at:'me', size, seconds, height, n, color }: validated and capped (particleplan.ts); the feature switch `particles` is the kill switch
+      if (!feature('particles')) break
+      const plan = planParticles(c.kind, c, FXS.particleTexture > 0)
+      if (!plan) break
+      const at2 = c.at === 'me' || c.x === undefined ? curMe : toLocal({ x: num(c.x, 0), y: num(c.y, 0), z: num(c.z, 0) })
+      particleFx.spawn(plan, at2, clock)
+      break
+    }
+    case 'probe': probeRun(String(c.name ?? '')); break // round 24: test builds only
     case 'hud': { // { text, seconds }: a line on the screen
       const text = typeof c.text === 'string' ? c.text.slice(0, 160) : ''
       hudMsg = text ? { text, until: clock + Math.max(0.5, Math.min(60, num(c.seconds, 5))) } : null
@@ -1031,6 +1046,7 @@ function hideAll() {
   arrows.update(0, clock, curMe)
   plumes.keepOnly(new Set())
   fxLib.clear()
+  particleFx.clear()
   trapMarks.update(clock, [])
   dropMarkers.update(clock, toWorld(curMe), [])
   bubbleFx.hide()

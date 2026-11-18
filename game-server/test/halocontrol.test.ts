@@ -48,3 +48,14 @@ test('versions are counted without addresses', () => {
   const h = new HaloControl(); h.seen('c23a', 1); h.seen('c23a', 1); h.seen(undefined, undefined)
   assert.deepEqual(Object.fromEntries(h.versions), { 'c23a/1': 2, 'none/0': 1 })
 })
+
+test('c24f candidate: the particles command is accepted for the three kinds and refused for an unknown kind or a non-numeric number', () => {
+  const h = new HaloControl(); h.forTick('0xabc', 0)
+  assert.equal(h.command('all', { c: 'particles', kind: 'fire', x: 1, y: 2, z: 3, size: 2 }), true)
+  assert.equal(h.command('all', { c: 'particles', kind: 'smoke', height: 150, seconds: 10 }), true)
+  assert.equal(h.command('all', { c: 'particles', kind: 'sparks' }), true)
+  assert.equal(h.command('all', { c: 'particles', kind: 'lava' }), false)
+  assert.equal(h.command('all', { c: 'particles', kind: 'fire', size: 'big' }), false)
+  assert.equal(h.command('all', { c: 'particles', kind: 'fire', x: NaN }), false)
+  assert.equal((h.forTick('0xabc', 0) as any).cmds.length, 3)
+})

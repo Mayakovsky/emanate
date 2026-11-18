@@ -108,5 +108,13 @@ test('server: without a token the bridge is off (404), whatever the mode says', 
 test('round 19: a reachable-spot list (about 100 KB) passes the bridge schema; any other event is still capped at 8 KB', () => {
   const spots = Array.from({ length: 1800 }, (_, i) => ({ x: i + 0.5, y: 0, z: -i - 0.5, cost: i / 10 }))
   assert.ok(parseSync({ events: [{ event: 'nav_spots', spots }], seq: 1 }))
-  assert.equal(parseSync({ events: [{ event: 'chat', text: 'x'.repeat(9000) }], seq: 2 }), null)
+  // round 24: any other event over 8 KB is dropped on its own (the sync stays valid), no longer a rejection of the whole sync
+  assert.deepEqual(parseSync({ events: [{ event: 'chat', text: 'x'.repeat(9000) }], seq: 2 })!.events, [])
+})
+
+test('an oversize diagnostic event is dropped, the rest of the sync is still accepted (round 24: a nav_probe blocked the live Synth)', () => {
+  const big = { event: 'nav_probe', rows: Array.from({ length: 700 }, () => [853.5, -965.5, [9.56, 6.06, 0], '#........####...####.......']) }
+  const s = parseSync({ pos: { x: 1, y: 2, z: 3 }, events: [{ event: 'position', position: [1, 2, 3] }, big, { event: 'players', players: [] }], seq: 5 })
+  assert.ok(s)
+  assert.deepEqual(s!.events.map((e: any) => e.event), ['position', 'players'])
 })

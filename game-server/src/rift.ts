@@ -17,6 +17,8 @@ export interface RiftPlan {
 export const RIFT_HEIGHT = 6
 export const RIFT_HALF_WIDTH = 2
 export const RIFT_SECONDS = 14
+export const RIFT_STEP_MS = 4500 // the Synth's walk into the Rift takes about 3.5 s; the match's own placement of the Synth waits this long
+export const PARK: Vec = { x: 0, y: 0, z: -124 } // where an ending's Synth waits: the spot it has sat at safely for hours
 export const SMOKE_CAP = 200 // the halo's cap for a smoke column
 
 export function planRift(t: RiftTrigger, ceiling = 200): RiftPlan {
@@ -37,5 +39,7 @@ export function planRift(t: RiftTrigger, ceiling = 200): RiftPlan {
     { afterMs: 2500, cmd: { cmd: 'move', x: t.at.x, y: base, z: t.at.z } },
     { afterMs: 3300, cmd: { cmd: 'move', x: t.at.x + 600, y: 0, z: t.at.z + 600 } }
   ]
+  // an ending: park the Synth at the safe spot (it stays 600 m away only for about 2 s: the scene runtime loads what is around it); the lobby end needs no step, the match's placement follows at RIFT_STEP_MS
+  if (t.kind !== 'trigger') synth.push({ afterMs: 5500, cmd: { cmd: 'move', x: PARK.x, y: PARK.y, z: PARK.z } })
   return { halo, synth, centre }
 }
