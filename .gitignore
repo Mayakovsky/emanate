@@ -20,7 +20,9 @@ __pycache__/
 cursor.config
 
 # the local-only game server must never be added to this public repo
-game-server/
+game-server/tools/
+game-server/logs/
+game-server/data/
 
 # local-only and sensitive material (EMANATE-PUSH-POLICY): never in this repo
 deploy/vps/

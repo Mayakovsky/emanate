@@ -1,0 +1,19 @@
+# Local-only game server: nothing here is published (no remote is configured).
+node_modules/
+logs/
+data/
+data-prod/
+# derived scan output
+scan/*.json
+scan/*.out
+# secrets and tokens, in any form
+.env
+.env.*
+*.key
+*.pem
+*token*
+*secret*
+*.pid
+*.log
+*.jsonl
+memory.json

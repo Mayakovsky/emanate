@@ -1,0 +1,11 @@
+{
+  "name": "emanate-game-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Emanate local game server (this PC only, 127.0.0.1). Node 24 runs the TypeScript directly (type stripping); no dependencies.",
+  "scripts": {
+    "start": "node src/server.ts",
+    "test": "node --test test/*.test.ts"
+  }
+}
