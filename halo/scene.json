@@ -3,15 +3,11 @@
   "runtimeVersion": "7",
   "isPortableExperience": true,
   "display": {
-    "title": "SDK7 Smart Wearable",
-    "description": "SDK7 Smart Wearable description here",
-    "navmapThumbnail": "images/thumbnail.png",
-    "favicon": "favicon_asset"
+    "title": "Emanate Halo",
+    "description": "Emanate: movement powers. It sends your position to its server."
   },
-  "owner": "",
   "contact": {
-    "name": "SDK",
-    "email": ""
+    "name": "Hidden Forces"
   },
   "main": "bin/game.js",
   "requiredPermissions": [

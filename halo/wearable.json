@@ -1,15 +1,15 @@
 {
   "id": "b4cacbf1-13a8-4a9b-b1e6-4bcd2e4c8224",
-  "name": "Emanate Halo Test",
-  "description": "Emanate movement-powers test halo (Zone only).",
-  "rarity": "mythic",
+  "name": "Emanate Halo",
+  "description": "Emanate movement powers. It sends your position to its server.",
+  "rarity": "common",
   "data": {
     "replaces": [],
     "hides": [],
     "tags": [
       "emanate",
       "halo",
-      "test"
+      "game"
     ],
     "representations": [
       {

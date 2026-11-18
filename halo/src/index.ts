@@ -39,20 +39,19 @@ import {
 } from '@dcl/sdk/ecs'
 import { Vector3, Color4 } from '@dcl/sdk/math'
 import { emit } from './net'
-import { gameInit, gameUpdate, gameTier, gamePlaceTrap, gameHud, gameCameraTest } from './game'
+import { gameInit, gameUpdate, gameTier, gamePlaceTrap, gameHud, gameCameraTest, hudOverlay } from './game'
+import { idle } from './net'
 import ReactEcs, { UiEntity, Label, ReactEcsRenderer } from '@dcl/sdk/react-ecs'
 import { dialogUi } from './dialog'
+import { POWER as P, feature } from './settings'
 
 type Tier = 0 | 1 | 2 | 3 // 0 normal (no powers), 1 Speed, 2 Jump, 3 Fly: the server decides the tier (round level, a Halo boost, a Discharge Trap hit)
 const TIER_NAMES: Record<Tier, string> = { 0: 'NORMAL', 1: 'SPRINT', 2: 'JUMP', 3: 'FLYING' }
 
 // ---- tunables (adjust from the Zone measurements) ----
 // Tier 1: sprint (normal: jog 8, run 10). Target run 15-25 m/s.
-const SPRINT = { walkSpeed: 5, jogSpeed: 11.7, runSpeed: 16.2 } // 02f: run/jog -10% (was 18/13); walk stays 5 (near the normal walk, not a power)
 // Tier 2: small normal-jump bump (normal ~1 m) + large double jump (~10 m, ~three stories).
-const JUMPS = { jumpHeight: 1.6, runJumpHeight: 2.2, doubleJumpHeight: 9 } // double jump -10% (02e; was 10)
 // Tier 3: Flying. Constant drift-down while the glider is open (a falling feather is ~0.5-1 m/s).
-const FLY_SINK = 0.3 // glidingFallingSpeed, m/s
 // Boost = a SUSTAINED FORCE while F is held, along the camera look direction (pitch included).
 // Real Unity values (CharacterControllerSettings.asset, from Desktop): Gravity -10, JumpGravityFactor 4
 // (gravity x4 = 40 m/s^2 while moving UP), GlideWindResponse 1.5 (continuous forces x1.5 while gliding),
@@ -60,29 +59,9 @@ const FLY_SINK = 0.3 // glidingFallingSpeed, m/s
 // falling needs F.y ~ 6.7 (10/1.5) and KEEPING a climb going needs F.y ~ 26.7 (40/1.5). Horizontal
 // F.x/F.z adds to the external velocity each frame (x1.5 while gliding). While the glider is open Unity
 // also clamps FALL speed to glidingFallingSpeed (ApplyGliding), so a dive needs that raised (see DIVE_SINK).
-const FY_HOLD = 7.0 // vertical force while not rising: holds height (needs 6.7), gains very slowly
-const FY_RISING = 27.0 // vertical force while rising: cancels the x4 rising gravity (needs 26.7)
-const FY_EASE = 24.0 // vertical force when the climb rate is above its target: slightly under 26.7, so the climb eases back
-const CLIMB_FORCE = 30 // extra vertical force at straight-up pitch (scaled by sin(pitch))
-const CLIMB_MAX = 14.5 // m/s target at ~45 degrees and above (scales with pitch). 02e: target 16.1 measured 21.1 (1 s avg); 02f wants 19.0, so 16.1 x 19.0/21.1 = 14.5
-const DIVE_FORCE = 25 // extra downward force at straight-down pitch
-const DIVE_MAX = 16.2 // m/s: the dive force fades to 0 as the descent rate reaches this (a brake takes over, see DIVE_BRAKE_*)
-const DIVE_SINK = 20.3 // glidingFallingSpeed while diving (look down + F): lets the glider clamp allow a fast descent
-const FWD_FORCE = 22 // horizontal force at level pitch (scaled by cos(pitch)); x1.5 while gliding
-const CEILING = 200 // m: the most other players can see
 // ---- Build 02d limits (1 s averages as the Synth sees them; Forces's numbers) ----
-const SPEED_CAP = 24.3 // m/s TOTAL speed in every tier and combination (02f: -10% from 27); a brake force enforces it
-const BRAKE = 40 // opposing force while over the cap
-const H_MAX = 19.2 // m/s top HORIZONTAL speed (02f: -10% from 21.3): thrust and the carry fade out toward it, and a brake holds it
-const DIVE_BRAKE_START = 17.8 // m/s descent at which an upward brake starts (full at +4.1): holds the dive near 21.9 (02f: -10%)
-const DIVE_BRAKE = 16 // upward force at full dive brake (gravity falling is 10)
-const CEILING_TAPER = 45 // lift fades to zero over the last 45 m below the ceiling (sim: a 22 m/s climb peaks ~194 m, was ~200)
 // ---- Build 02d quick landing: hardLandingCooldown overrides Unity's LongFallStunTime (0.75 s) ----
-const LAND_COOLDOWN = 0.25 // s: one third of 0.75
 // ---- Build 02d momentum jump (halo-tools/jump_sim.py): quadratic air drag + weak air accel make a run jump settle ~10 m/s ----
-const JUMP_BONUS = 0.25 // jump heights x(1 + this * hSpeed/18): a faster run jumps higher
-const AIR_IMPULSE = 0.3 // at takeoff, an instant extra forward speed of this fraction of the takeoff speed
-const AIR_CARRY_K = 0.55 // in the air (not boosting), a forward force of this * takeoff speed along the takeoff heading
 const BOOST_SOURCE = engine.addEntity()
 const BRAKE_SOURCE = engine.addEntity()
 const AIR_SOURCE = engine.addEntity()
@@ -135,6 +114,9 @@ function setTier(next: Tier) {
 let hudText = 'halo: starting...'
 function hudUi() {
   const d = dialogUi()
+  const o = hudOverlay()
+  const line = (text: string, top: string, size: number, color: Color4) =>
+    text ? ReactEcs.createElement(UiEntity, { uiTransform: { positionType: 'absolute', position: { top, left: '30%' }, width: '40%', height: 30, pointerFilter: 'none' } }, ReactEcs.createElement(Label, { value: text, fontSize: size, textAlign: 'middle-center', color })) : null
   return ReactEcs.createElement(
     UiEntity,
     { uiTransform: { positionType: 'absolute', position: { top: 0, left: 0 }, width: '100%', height: '100%', pointerFilter: 'none' } },
@@ -142,10 +124,13 @@ function hudUi() {
       UiEntity,
       {
         uiTransform: { positionType: 'absolute', position: { top: '42%', left: '1%' }, width: 720, height: 270, pointerFilter: 'none' },
-        uiBackground: { color: Color4.create(0, 0, 0, 0.55) }
+        uiBackground: { color: Color4.create(0, 0, 0, idle || !feature('debugPanel') ? 0 : 0.55) }
       },
-      ReactEcs.createElement(Label, { value: hudText, fontSize: 14, textAlign: 'top-left', color: Color4.White() })
+      feature('debugPanel') && !idle ? ReactEcs.createElement(Label, { value: hudText + '\n' + o.info, fontSize: 14, textAlign: 'top-left', color: Color4.White() }) : null
     ),
+    line(o.active, '0.5%', 11, Color4.create(1, 1, 1, 0.7)),
+    line(o.msg, '12%', 20, Color4.create(1, 0.95, 0.5, 1)),
+    line(o.prompt, '20%', 22, Color4.create(0.5, 1, 0.8, 1)),
     d
   )
 }
@@ -157,25 +142,36 @@ function applySettings() {
     AvatarLocomotionSettings.deleteFrom(engine.PlayerEntity)
     return
   }
-  const settings: Record<string, number> = { ...SPRINT, hardLandingCooldown: LAND_COOLDOWN }
+  const settings: Record<string, number> = { walkSpeed: P.walkSpeed, jogSpeed: P.jogSpeed, runSpeed: P.runSpeed, hardLandingCooldown: P.landCooldown }
   if (tier >= 2) {
-    Object.assign(settings, JUMPS)
+    settings.doubleJumpHeight = P.doubleJumpHeight
     // a faster run jumps higher (read when the jump starts); the double jump is unchanged
-    const f = 1 + JUMP_BONUS * Math.max(0, Math.min(1, hSm / 18))
-    settings.jumpHeight = JUMPS.jumpHeight * f
-    settings.runJumpHeight = JUMPS.runJumpHeight * f
+    const f = 1 + P.jumpBonus * Math.max(0, Math.min(1, hSm / 18))
+    settings.jumpHeight = P.jumpHeight * f
+    settings.runJumpHeight = P.runJumpHeight * f
   }
   // the glider clamps FALL speed to this: slow drift normally, a high limit while diving
-  if (tier >= 3) settings.glidingFallingSpeed = diving ? DIVE_SINK : FLY_SINK
+  if (tier >= 3) settings.glidingFallingSpeed = diving ? P.diveSink : P.flySink
   AvatarLocomotionSettings.createOrReplace(engine.PlayerEntity, settings)
 }
 
 function liftFactor(y: number): number {
-  return Math.max(0, Math.min(1, (CEILING - y) / CEILING_TAPER))
+  return Math.max(0, Math.min(1, (P.ceiling - y) / P.ceilingTaper))
 }
 
 function halo(dt: number) {
   elapsed += dt
+  if (idle || !feature('powers')) {
+    // idle (the server's kill switch) or the powers switched off: the client's own locomotion, no forces
+    if (tier !== 0) setTier(0)
+    AvatarLocomotionSettings.deleteFrom(engine.PlayerEntity)
+    Physics.removeForceFromPlayer(BOOST_SOURCE)
+    Physics.removeForceFromPlayer(BRAKE_SOURCE)
+    Physics.removeForceFromPlayer(AIR_SOURCE)
+    const t0 = Transform.getOrNull(engine.PlayerEntity)
+    if (t0) try { gameUpdate(dt, Vector3.create(t0.position.x, t0.position.y, t0.position.z), 0, false, 0, 0) } catch (e) {}
+    return
+  }
 
   // ---- input (and log everything we receive) ----
   for (const [action, name] of ACTIONS) {
@@ -212,22 +208,22 @@ function halo(dt: number) {
       const hLen = Math.sqrt(look.x * look.x + look.z * look.z)
       // horizontal: along the look direction, scaled by cos(pitch)
       // fade the push out as the horizontal speed approaches H_MAX
-      const hRamp = Math.max(0, Math.min(1, (H_MAX - hSm) / 3))
-      const fx = hLen > 1e-4 ? (look.x / hLen) * FWD_FORCE * cosp * hRamp : 0
-      const fz = hLen > 1e-4 ? (look.z / hLen) * FWD_FORCE * cosp * hRamp : 0
+      const hRamp = Math.max(0, Math.min(1, (P.hMax - hSm) / 3))
+      const fx = hLen > 1e-4 ? (look.x / hLen) * P.fwdForce * cosp * hRamp : 0
+      const fz = hLen > 1e-4 ? (look.z / hLen) * P.fwdForce * cosp * hRamp : 0
       // vertical. WHY not 'switch to the rising force once rising': gravity jumps from 10 to 40 the moment
       // vy > 0, so a force chosen from the measured vy balances at vy ~ 0 and never climbs (this is what
       // flew in c7e3381; simulated in halo-tools). So: looking UP (beyond ~10 deg) always uses the strong
       // 'rising' force; the climb is capped by easing off above a target rate that scales with the pitch.
       // Level (or within ~10 deg) uses the hold force (holds height). Looking DOWN adds a downward force.
-      let fy = FY_HOLD
+      let fy = P.fyHold
       if (sinp > 0) {
         const w = Math.max(0, Math.min(1, sinp / 0.17)) // 0 level .. 1 at ~10 degrees up
-        const base = FY_HOLD + (FY_RISING - FY_HOLD) * w + CLIMB_FORCE * sinp
-        const target = Math.min(CLIMB_MAX, (CLIMB_MAX * sinp) / 0.7)
-        fy = vySm < target ? base : FY_EASE
+        const base = P.fyHold + (P.fyRising - P.fyHold) * w + P.climbForce * sinp
+        const target = Math.min(P.climbMax, (P.climbMax * sinp) / 0.7)
+        fy = vySm < target ? base : P.fyEase
       } else {
-        fy += DIVE_FORCE * sinp * Math.max(0, Math.min(1, (DIVE_MAX + vySm) / 3))
+        fy += P.diveForce * sinp * Math.max(0, Math.min(1, (P.diveMax + vySm) / 3))
       }
       // ramp any upward force to 0 over the last CEILING_TAPER m below the ceiling
       if (fy > 0) fy *= liftFactor(t.position.y)
@@ -262,20 +258,20 @@ function halo(dt: number) {
     let by = 0
     let bz = 0
     const total = Vector3.length(velSm)
-    if (total > SPEED_CAP) {
+    if (total > P.speedCap) {
       const u = Vector3.normalize(velSm)
-      bx = -u.x * BRAKE
-      by = -u.y * BRAKE
-      bz = -u.z * BRAKE
+      bx = -u.x * P.brake
+      by = -u.y * P.brake
+      bz = -u.z * P.brake
     }
     // (the dive brake, like the horizontal one, only acts when the total-speed brake is not already opposing)
-    if (total <= SPEED_CAP && vySm < -DIVE_BRAKE_START) by += Math.min(1, (-vySm - DIVE_BRAKE_START) / 4.1) * DIVE_BRAKE
+    if (total <= P.speedCap && vySm < -P.diveBrakeStart) by += Math.min(1, (-vySm - P.diveBrakeStart) / 4.1) * P.diveBrake
     // horizontal limit: a real brake (02d only faded the thrust and measured 28.5 against 26)
     // (only when the total-speed brake is not already opposing the whole velocity: the two must not stack)
-    if (total <= SPEED_CAP && hSm > H_MAX) {
-      const k = Math.min(1, (hSm - H_MAX) / 1.5)
-      bx += (-velSm.x / hSm) * BRAKE * k
-      bz += (-velSm.z / hSm) * BRAKE * k
+    if (total <= P.speedCap && hSm > P.hMax) {
+      const k = Math.min(1, (hSm - P.hMax) / 1.5)
+      bx += (-velSm.x / hSm) * P.brake * k
+      bz += (-velSm.z / hSm) * P.brake * k
     }
     if (bx !== 0 || by !== 0 || bz !== 0) {
       Physics.applyForceToPlayer(BRAKE_SOURCE, Vector3.create(bx, by, bz))
@@ -298,7 +294,7 @@ function halo(dt: number) {
         h0 = Vector3.length(hPrev)
         if (h0 > 3) {
           carryDir = Vector3.normalize(hPrev)
-          Physics.applyImpulseToPlayer(Vector3.scale(carryDir, AIR_IMPULSE * h0))
+          Physics.applyImpulseToPlayer(Vector3.scale(carryDir, P.airImpulse * h0))
         }
       }
     } else {
@@ -311,8 +307,8 @@ function halo(dt: number) {
       }
     }
     if (airborne && h0 > 3 && !(tier === 3 && fHeldNow)) {
-      const scale = Math.max(0, Math.min(1, (H_MAX - hSm) / 3)) // fades out toward the horizontal limit (H_MAX)
-      if (scale > 0.01) Physics.applyForceToPlayer(AIR_SOURCE, Vector3.scale(carryDir, AIR_CARRY_K * h0 * scale))
+      const scale = Math.max(0, Math.min(1, (P.hMax - hSm) / 3)) // fades out toward the horizontal limit (H_MAX)
+      if (scale > 0.01) Physics.applyForceToPlayer(AIR_SOURCE, Vector3.scale(carryDir, P.airCarryK * h0 * scale))
       else Physics.removeForceFromPlayer(AIR_SOURCE)
     } else {
       Physics.removeForceFromPlayer(AIR_SOURCE)
@@ -339,7 +335,7 @@ function halo(dt: number) {
 ` +
         `speed: ${hSm.toFixed(1)} h, ${vySm.toFixed(1)} v, ${Vector3.length(velSm).toFixed(1)} total m/s (smoothed)   air: ${airborne ? 'yes' : 'no'}
 ` +
-        `glideFall limit: ${diving ? DIVE_SINK : FLY_SINK} m/s   land cooldown: ${LAND_COOLDOWN}s   camera: ${Transform.getOrNull(engine.CameraEntity) ? 'read' : 'NOT readable'}
+        `glideFall limit: ${diving ? P.diveSink : P.flySink} m/s   land cooldown: ${P.landCooldown}s   camera: ${Transform.getOrNull(engine.CameraEntity) ? 'read' : 'NOT readable'}
 ` +
         gameHud(0)
     }
@@ -350,7 +346,7 @@ function halo(dt: number) {
         `[halo] t=${elapsed.toFixed(1)} tier=${tier} pos=(${t.position.x.toFixed(1)},${t.position.y.toFixed(1)},${t.position.z.toFixed(1)}) ` +
           `hspeed=${speed.toFixed(1)} vy=${vy.toFixed(1)} v3=${Vector3.length(vel).toFixed(1)} maxY=${maxHeight.toFixed(1)} maxHSpeed=${maxSpeed.toFixed(1)} boost=${boostLog} ` +
           `F=${inputSystem.isPressed(InputAction.IA_SECONDARY)} space=${inputSystem.isPressed(InputAction.IA_JUMP)} ` +
-          `forceComp=${PhysicsCombinedForce.has(engine.PlayerEntity)} glideFall=${diving ? DIVE_SINK : FLY_SINK}`
+          `forceComp=${PhysicsCombinedForce.has(engine.PlayerEntity)} glideFall=${diving ? P.diveSink : P.flySink}`
       )
     }
   }

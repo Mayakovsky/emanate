@@ -6,8 +6,9 @@ import { getPlayer } from '@dcl/sdk/players'
 import { getUserData } from '~system/UserIdentity'
 import { skyUpdate, skyText, skyStart } from './sky'
 import { openDialog, closeDialog, setDialogClock, dialog } from './dialog'
-import { Arrows, Plumes, ChargeArcs, DropMarkers, TrapMarkers, BubbleFx, RiftFx as BurstRiftFx, TestMarkers, EndgameFx, SkyDome, StandIn, RiftFx, AuroraFx, DistanceMarkers, CameraTests, MARKER_COLOR_NAMES, MARKER_DISTANCES, initSounds, playSlot, playSound, soundsUpdate, setRemoteAudio, audioStats, slotSource } from './fx'
-import { emit, netUpdate, sendGameEvent, serverState, serverUp, probeWebSocket, probeAll, probeText, lastErr, netStatus, lastGameError, manifestUpdate, manifestInfo } from './net'
+import { FxLib, playLib, FX_KINDS, Arrows, Plumes, ChargeArcs, DropMarkers, TrapMarkers, BubbleFx, RiftFx as BurstRiftFx, TestMarkers, EndgameFx, SkyDome, StandIn, RiftFx, AuroraFx, DistanceMarkers, CameraTests, MARKER_COLOR_NAMES, MARKER_DISTANCES, initSounds, playSlot, playSound, soundsUpdate, setRemoteAudio, audioStats, slotSource } from './fx'
+import { idle, setIdle, refetchSettings, cmdQueue, settingsInfo, refusedNote, emit, netUpdate, sendGameEvent, serverState, serverUp, probeWebSocket, probeAll, probeText, lastErr, netStatus, lastGameError, manifestUpdate, manifestInfo } from './net'
+import { FXS, TICK, applyRemote, feature, say, PROTOCOL_VERSION } from './settings'
 import {
   ArrowChannel, PlumeBudget, Warnings, pressRed, pressPink, RULES, TEST_TARGETS, testMovingSynth, testDeadZoneDistance, dist, nearest, type Vec, type Target
 } from './logic'
@@ -19,6 +20,13 @@ const toWorld = (p: Vec): Vec => ({ x: p.x + ORIGIN.x, y: p.y, z: p.z + ORIGIN.z
 const toLocal = (p: Vec): Vec => ({ x: p.x - ORIGIN.x, y: p.y, z: p.z - ORIGIN.z })
 
 const arrows = new Arrows()
+const fxLib = new FxLib()
+let hudMsg: { text: string; until: number } | null = null // a HUD line the server asked for
+let promptUntil = 0 // the glider prompt
+let wasIdle = false
+let pushUntil = 0
+let pushForce = { x: 0, y: 0, z: 0 }
+const PUSH_SOURCE = engine.addEntity()
 const plumes = new Plumes()
 const arcs = new ChargeArcs()
 const dropMarkers = new DropMarkers()
@@ -155,22 +163,23 @@ export function gameTier(base: 0 | 1 | 2 | 3): 0 | 1 | 2 | 3 {
 // E: place a Discharge Trap where the player stands (one at a time). The server keeps the trap, every halo draws it; it goes off when the Synth or any
 // player (the placer and teammates too) comes within 5 m: everyone in range drops one power level for 10 s.
 export function gamePlaceTrap() {
+  if (!feature('trap')) return
   const world = toWorld(curMe)
   if (mode === 'server') {
     if (serverState?.you?.hasTrap) {
       playSlot('halo.denied')
-      note('you already have a trap down')
+      note(say('trapDenied'))
       emit('trap', { sent: false, reason: 'one at a time' })
       return
     }
     sendGameEvent({ ev: 'trap' })
     emit('trap', { sent: true, mode })
-    note('Discharge Trap placed')
+    note(say('trapPlaced'))
     return
   }
   if (testTrap) {
     playSlot('halo.denied')
-    note('you already have a trap down')
+    note(say('trapDenied'))
     emit('trap', { sent: false, reason: 'one at a time', mode })
     return
   }
@@ -207,6 +216,16 @@ ${round}   keys: 1 red ${cd('red')}  2 pink ${cd('pink')}  3 dead-zone ${warning
 export function gameUpdate(dt: number, me: Vec, speed: number, airborne: boolean, tier: number, vy: number) {
   if (!started) return
   clock += dt
+  if (idle) {
+    // the server's kill switch (or a refusal): nothing is drawn, nothing is forced, nothing is sent about the player
+    if (!wasIdle) { wasIdle = true; hideAll(); emit('idle', { on: true }) }
+    netUpdate(dt, { pid: myId, name: myName, pos: toWorld(me), local: me, speed, tier }) // only the bare wake-up poll runs while idle
+    return
+  }
+  if (wasIdle) { wasIdle = false; emit('idle', { on: false }) }
+  while (cmdQueue.length) { try { runCommand(cmdQueue.shift()!) } catch (e) { emit('error', { where: 'command', msg: String(e) }) } }
+  if (pushUntil > clock) Physics.applyForceToPlayer(PUSH_SOURCE, Vector3.create(pushForce.x, pushForce.y, pushForce.z))
+  else if (pushUntil !== 0) { pushUntil = 0; Physics.removeForceFromPlayer(PUSH_SOURCE) }
   const wasServer = mode === 'server'
   mode = serverUp() ? 'server' : 'test'
   if ((mode === 'server') !== wasServer) emit('mode', { mode, err: lastErr })
@@ -303,7 +322,7 @@ export function gameUpdate(dt: number, me: Vec, speed: number, airborne: boolean
   // ---- warnings (automatic) ----
   const dz = mode === 'server' ? serverState?.deadzone ?? null : testDeadZoneDistance(world)
   const dzDist: number | null = dz ? dz.dist : null
-  if (warnings.deadZone(arrows.runs.white.ch, clock, speed, dzDist)) {
+  if (feature('deadzoneWarn') && feature('arrows') && warnings.deadZone(arrows.runs.white.ch, clock, speed, dzDist)) {
     arrows.runs.white.target = () => {
       const q = mode === 'server' ? serverState?.deadzone : testDeadZoneDistance(toWorld(curMe))
       if (!q) return null
@@ -315,7 +334,7 @@ export function gameUpdate(dt: number, me: Vec, speed: number, airborne: boolean
     note('WARNING: approaching dead zone')
   }
   const drops = dropList()
-  const up = warnings.upgradeNearby(arrows.runs.pink.ch, clock, world, drops)
+  const up = feature('arrows') ? warnings.upgradeNearby(arrows.runs.pink.ch, clock, world, drops) : null
   if (up) {
     arrows.runs.pink.target = () => livePos(up)
     arrows.runs.pink.mode = 'arrow'
@@ -344,10 +363,14 @@ export function gameUpdate(dt: number, me: Vec, speed: number, airborne: boolean
   }
   prevMe = { x: me.x, y: me.y, z: me.z }
   arrows.update(dt, clock, { x: me.x + velSmooth.x * 0.05, y: me.y, z: me.z + velSmooth.z * 0.05 }) // arrows are drawn in scene-local space at the feet
+  fxLib.update(clock)
+  gliderPrompt(airborne, tier)
   syncPlumes(me)
   syncTraps(me, world)
   syncBubble(dt, me, world)
   liftGlideUpdate(dt, me, world, vy, airborne)
+  lastAirborne = airborne
+  teleportCheck()
   dropMarkers.update(clock, world, drops.map((d) => ({ id: d.id!, pos: toLocal(d.pos) })).map((d) => ({ id: d.id, pos: d.pos })))
   const sp = synthPos() ?? nearest(world, testSynths())?.target.pos ?? null
   if (contactFx && clock >= contactFx.until) contactFx = null
@@ -404,6 +427,7 @@ export function gameUpdate(dt: number, me: Vec, speed: number, airborne: boolean
   }
 }
 let curMe: Vec = { x: 0, y: 0, z: 0 }
+let lastAirborne = false
 let prevMe: Vec | null = null
 let velSmooth: Vec = { x: 0, y: 0, z: 0 }
 let charging = false
@@ -428,6 +452,7 @@ function startAuto(kind: 'purple' | 'yellow', target: () => Vec | null, source: 
 
 // ---- keys ----
 function keyRed(world: Vec) {
+  if (!feature('arrows')) return
   const r = arrows.runs.red
   const syn = mode === 'server' ? synthPos() : nearest(world, testSynths())?.target.pos ?? null
   const res = pressRed(r.ch, clock, world, syn)
@@ -455,6 +480,7 @@ function keyRed(world: Vec) {
   }
 }
 function keyPink(world: Vec) {
+  if (!feature('arrows')) return
   const r = arrows.runs.pink
   const res = pressPink(r.ch, clock, world, dropList())
   emit('arrow', { kind: 'pink', key: 2, result: res.kind, d: 'd' in res ? res.d : null, cooldownLeft: r.ch.cooldownLeft(clock) })
@@ -472,17 +498,19 @@ function keyPink(world: Vec) {
   }
 }
 function keyDeadZone() {
+  if (!feature('deadzoneWarn')) return
   const on = warnings.toggleDeadZone()
   emit('dead-zone-warnings', { on })
   note(`dead-zone warnings ${on ? 'ON' : 'OFF'}`)
   playSlot(on ? 'halo.warnings_on' : 'halo.warnings_off')
 }
 function keyPlume(world: Vec) {
+  if (!feature('plumes')) return
   const have = mode === 'server' ? (serverState?.you?.plumesLeft ?? 0) > 0 : budget.left > 0
   if (!have) {
     emit('plume', { sent: false, reason: 'none left' })
     playSlot('halo.denied')
-    note('no plumes left this round')
+    note(say('noPlumes'))
     return
   }
   if (mode === 'test') budget.use()
@@ -493,7 +521,7 @@ function keyPlume(world: Vec) {
   plumes.spawn(id, toLocal(world), 0, clock)
   playSlot('halo.plume')
   emit('plume', { sent: true, pos: world, mode })
-  note('plume sent')
+  note(say('plumeSent'))
 }
 const ownPlumes = new Map<number | string, { base: Vec; born: number }>()
 
@@ -519,6 +547,7 @@ function syncTraps(me: Vec, world: Vec) {
 // ---- the lobby bubble ----
 let lastBubble: { at: Vec; radius: number } | null = null
 function syncBubble(dt: number, me: Vec, world: Vec) {
+  if (!feature('bubbleFx')) { bubbleFx.hide(); return }
   let shown = false
   if (mode === 'server' && serverState?.bubble) {
     const b = serverState.bubble
@@ -556,7 +585,7 @@ export function probeHud() {
 }
 // Ctrl+1: lift to a chosen altitude (50, 100, 150, 200 m; each press picks the next) with a sustained upward force, release it, then the wearer HOLDS JUMP to open the unpowered glider and steers;
 // the probe logs the sink rate, the horizontal speed, the landing spot and the time taken
-function startLiftGlide(world: Vec) {
+function startLiftGlide(world: Vec, altitude?: number) {
   if (lg && lg.phase !== 'done') {
     Physics.removeForceFromPlayer(LIFT_SOURCE)
     probeReport('lift-glide', { aborted: true })
@@ -564,8 +593,8 @@ function startLiftGlide(world: Vec) {
     probeNote = 'lift-glide: aborted'
     return
   }
-  const target = LIFT_TARGETS[liftIdx % LIFT_TARGETS.length]!
-  liftIdx++
+  const target = altitude !== undefined ? Math.max(20, Math.min(220, altitude)) : LIFT_TARGETS[liftIdx % LIFT_TARGETS.length]!
+  if (altitude === undefined) liftIdx++
   lg = { phase: 'lift', target, start: { ...world }, t0: clock, tRelease: 0, release: null, sampleAt: 0, sinkSum: 0, sinkN: 0, hSum: 0, wasAir: false, maxY: world.y }
   probeReport('lift-glide', { start: world, target })
   probeNote = `lift-glide: lifting to ${target} m (press Ctrl+1 again to abort)`
@@ -584,6 +613,7 @@ function liftGlideUpdate(dt: number, me: Vec, world: Vec, vy: number, airborne: 
       s.tRelease = clock
       s.release = { ...world }
       s.wasAir = true
+      promptUntil = clock + 12
       probeReport('lift-glide', { released: true, y: world.y, liftSeconds: +(clock - s.t0).toFixed(1), x: world.x, z: world.z })
     }
     probeNote = `lift-glide: lifting ${world.y.toFixed(0)}/${s.target} m, climb ${vy.toFixed(1)} m/s`
@@ -635,6 +665,40 @@ function probeMovePlayerTo(world: Vec) {
   }
 }
 const me0 = () => curMe
+// the server asks for a teleport (the group start, or the admin's limit probe): one movePlayerTo call, the result and where the avatar ends up are reported to the server's probe log
+const teleportPending: { id: string; t0: number; from: Vec; asked: Vec; result: string; checkAt: number }[] = [] // one entry per call: every call is reported
+function serverTeleport(ev: any) {
+  const asked = { x: Number(ev.x), y: Number(ev.y), z: Number(ev.z) }
+  if (![asked.x, asked.y, asked.z].every((v) => Number.isFinite(v))) return
+  const id = String(ev.id ?? '').slice(0, 24)
+  const from = toWorld(curMe)
+  note(`teleport ${id}: ${Math.round(Math.hypot(asked.x - from.x, asked.z - from.z))} m`)
+  try {
+    const ra = (globalThis as any).require ? (globalThis as any).require('~system/RestrictedActions') : null
+    if (!ra || typeof ra.movePlayerTo !== 'function') {
+      probeReport('teleport', { id, result: 'module-or-function-missing' })
+      return
+    }
+    const local = toLocal(asked)
+    const t0 = clock
+    const tp = { id, t0, from, asked, result: 'calling', checkAt: 1e9 }
+    teleportPending.push(tp)
+    Promise.resolve(ra.movePlayerTo({ newRelativePosition: Vector3.create(local.x, local.y, local.z) })).then(
+      (r: unknown) => { tp.result = 'returned ' + JSON.stringify(r).slice(0, 60); tp.checkAt = clock + 1.5; tp.t0 = clock - tp.t0 },
+      (e: unknown) => { probeReport('teleport', { id, result: 'rejected', error: String(e).slice(0, 160), from, asked }); const k = teleportPending.indexOf(tp); if (k >= 0) teleportPending.splice(k, 1) }
+    )
+  } catch (e) {
+    probeReport('teleport', { id, result: 'threw', error: String(e).slice(0, 160), from, asked })
+  }
+}
+function teleportCheck() {
+  for (const tp of [...teleportPending]) {
+    if (clock < tp.checkAt) continue
+    teleportPending.splice(teleportPending.indexOf(tp), 1)
+    const now = toWorld(curMe)
+    probeReport('teleport', { id: tp.id, result: tp.result, seconds: +Number(tp.t0).toFixed(2), from: tp.from, asked: tp.asked, ended: now, error_m: +Math.hypot(now.x - tp.asked.x, now.y - tp.asked.y, now.z - tp.asked.z).toFixed(1), airborne: lastAirborne })
+  }
+}
 function ctrlKeys(pressed: (a: InputAction) => boolean, me: Vec, world: Vec) {
   if (pressed(InputAction.IA_ACTION_3)) startLiftGlide(world)
   if (pressed(InputAction.IA_ACTION_4)) {
@@ -647,6 +711,7 @@ function ctrlKeys(pressed: (a: InputAction) => boolean, me: Vec, world: Vec) {
   if (pressed(InputAction.IA_ACTION_5)) probeMovePlayerTo(world)
 }
 function syncPlumes(me: Vec) {
+  if (!feature('plumes')) { plumes.keepOnly(new Set()); return }
   // plumes: our own (drawn at once) plus every plume the server lists (everyone in the match, ours skipped by position/time)
   const keep = new Set<number | string>()
   for (const [id, p] of ownPlumes) {
@@ -671,7 +736,7 @@ function handleServerEvent(ev: any) {
   switch (ev.ev) {
     case 'contact': contactFx = { pos: { x: ev.x, y: ev.y, z: ev.z }, until: clock + 1.5, stage: ev.stage === 'free' ? 'reset' : ev.stage }; break
     case 'warn5': playSlot('warn.five_minutes'); note('5 minutes left in the round'); break
-    case 'round-start': budget.refill(); note(`round ${ev.round} started`); playSlot('round.start'); break
+    case 'round-start': budget.refill(); note(say('roundStart', { round: ev.round })); playSlot('round.start'); break
     case 'round-complete': {
       note(`round ${ev.round} complete (${ev.side})`)
       const at = contactFx ? contactFx.pos : serverState?.synth ? { x: serverState.synth.x, y: serverState.synth.y, z: serverState.synth.z } : { x: 0, y: 0, z: 0 }
@@ -692,10 +757,11 @@ function handleServerEvent(ev: any) {
     case 'charge-broken': note('charge broken by the other side'); playSlot('charge.broken'); break
     case 'stage': note(`Synth ${ev.stage} mode`); playSlot(ev.stage === 'repair' ? 'charge.repair' : ev.stage === 'upgrade' ? 'charge.upgrade' : 'charge.reset'); break
     case 'pickup': playSlot('halo.upgrade_pickup'); note(ev.kind === 'boost' ? 'Halo boost: 30 s (applied now)' : `picked up ${ev.kind}`); break
-    case 'lobby': lobbyNote = `LOBBY: everyone into the bubble (${Math.round(ev.seconds)} s)`; note('The Synth: everyone into the bubble!'); playSlot('warn.upgrade'); break
-    case 'lobby-end': lobbyNote = ''; note(`the bubble blows: ${ev.mode} with ${ev.count}`); playSlot('cine.rift.strike'); if (lastBubble) burstState = { t0: clock, at: lastBubble.at, radius: lastBubble.radius }; break
+    case 'lobby': lobbyNote = `LOBBY: everyone into the bubble (${Math.round(ev.seconds)} s)`; note(say('lobbyCall')); playSlot('warn.upgrade'); break
+    case 'lobby-end': lobbyNote = ''; note(say('lobbyEnd', { mode: ev.mode, count: ev.count })); playSlot('cine.rift.strike'); if (lastBubble) { burstState = { t0: clock, at: lastBubble.at, radius: lastBubble.radius }; riftOpening(lastBubble.at) }; break
     case 'lobby-wait': lobbyNote = 'waiting for the next lobby'; note('the game started without you: you wait for the next lobby'); break
-    case 'toss': note(`toss start event: round ${ev.round}, altitude ${ev.altitude} m (this build only logs it; test the lift with Ctrl+1)`); probeReport('toss-event', { round: ev.round, altitude: ev.altitude }); break
+    case 'teleport': serverTeleport(ev); break
+    case 'toss': runCommand({ c: 'lift', altitude: Number(ev.altitude) || 100 }); probeReport('toss-event', { round: ev.round, altitude: ev.altitude }); break
     case 'trap-hit': playSlot('warn.upgrade'); note(ev.synth ? 'Discharge Trap hit the Synth' : 'Discharge Trap went off'); emit('trap-hit', { x: ev.x, z: ev.z, synth: ev.synth, players: ev.players }); break
     case 'endgame': note(`endgame: ${ev.kind}`); break
     case 'double-agent': note('you were recruited as a double agent'); playSlot('role.double_agent'); break
@@ -719,6 +785,7 @@ function cineTrigger(world: Vec) {
   startCine(cine, toLocal(testMovingSynth(testClock)))
 }
 function startCine(c: number, at: Vec) {
+  if (!feature('cinematics') && c !== 0) return
   cine = c
   cineStart = clock
   cueRiftOpen = false
@@ -911,4 +978,79 @@ function startFinal() {
   openDialog('info', clock, () => {}, { title: 'THE FINAL CINEMATIC', body: 'Three replayed rounds. The sky ignites.' })
   toastUntil = clock + 6
   emit('final-cinematic', {})
+}
+
+
+// ---------------- round 23: the server-to-halo command set (protocol 1) ----------------
+// A command is { c: <name>, v?: <protocol it needs>, ...params }. Unknown commands, commands that need a newer protocol, and malformed parameters are IGNORED, never an error.
+const num = (x: unknown, d: number) => (typeof x === 'number' && Number.isFinite(x) ? x : d)
+function runCommand(c: Record<string, unknown>) {
+  if (typeof c.v === 'number' && c.v > PROTOCOL_VERSION) return
+  switch (c.c) {
+    case 'hud': { // { text, seconds }: a line on the screen
+      const text = typeof c.text === 'string' ? c.text.slice(0, 160) : ''
+      hudMsg = text ? { text, until: clock + Math.max(0.5, Math.min(60, num(c.seconds, 5))) } : null
+      break
+    }
+    case 'sound': { // { id }: a slot id of the audio list, or lib:<name>
+      if (typeof c.id === 'string' && c.id.length <= 60) playSlot(c.id)
+      break
+    }
+    case 'fx': { // { kind, x,y,z (world) | at:'me', size, seconds, color, n, height, heading }
+      if (typeof c.kind !== 'string') break
+      const at = c.at === 'me' || c.x === undefined ? curMe : toLocal({ x: num(c.x, 0), y: num(c.y, 0), z: num(c.z, 0) })
+      fxLib.spawn(c.kind, at, clock, { size: num(c.size, 3), seconds: num(c.seconds, 3), color: c.color, n: num(c.n, 12), height: num(c.height, 20), heading: num(c.heading, 0) })
+      break
+    }
+    case 'push': { // { x,y,z, seconds }: a force on the wearer for a while (limited)
+      const f = { x: Math.max(-40, Math.min(40, num(c.x, 0))), y: Math.max(-40, Math.min(60, num(c.y, 0))), z: Math.max(-40, Math.min(40, num(c.z, 0))) }
+      pushForce = f
+      pushUntil = clock + Math.max(0.1, Math.min(10, num(c.seconds, 1)))
+      break
+    }
+    case 'lift': startLiftGlide(toWorld(curMe), num(c.altitude, 100)); break // the lift-and-glide start: the halo lifts, releases, and prompts for the glider
+    case 'teleport': serverTeleport(c); break
+    case 'tick': applyRemote({ tick: { everySec: num(c.every, TICK.everySec) } }); break
+    case 'feature': if (typeof c.name === 'string') applyRemote({ features: { [c.name]: c.on === false || c.on === 0 ? 0 : 1 } }); break
+    case 'idle': setIdle(c.on !== false); break
+    case 'settings': refetchSettings(); break
+    default: break // unknown: ignored
+  }
+}
+function riftOpening(at: Vec) {
+  // the Rift opening as its own effect: the lobby bubble's centre
+  fxLib.spawn('rift', at, clock, { size: Math.max(2, FXS.riftRadius * 0.5), seconds: Math.max(1, FXS.riftSeconds), height: 70, color: 'purple' })
+}
+function gliderPrompt(airborne: boolean, tier: number) {
+  if (airborne && !lastAirborne && tier >= 3 && FXS.gliderPrompt > 0) promptUntil = clock + FXS.gliderPromptSeconds
+  if (inputSystem.isPressed(InputAction.IA_JUMP) && promptUntil > 0 && clock - (promptUntil - FXS.gliderPromptSeconds) > 1) promptUntil = 0 // jump is held: the glider is being opened
+}
+function hideAll() {
+  for (const k of Object.keys(arrows.runs) as (keyof typeof arrows.runs)[]) arrows.runs[k].target = null
+  arrows.update(0, clock, curMe)
+  plumes.keepOnly(new Set())
+  fxLib.clear()
+  trapMarks.update(clock, [])
+  dropMarkers.update(clock, toWorld(curMe), [])
+  bubbleFx.hide()
+  burstRift.hide()
+  burstState = null
+  if (endgameFx.built) endgameFx.hide()
+  if (skyDome.on) skyDome.toggle()
+  camTests.setMode(0)
+  standIn.hide()
+  rift.hide()
+  closeDialog()
+  Physics.removeForceFromPlayer(PUSH_SOURCE)
+  hudMsg = null
+  promptUntil = 0
+}
+/** the lines index.ts draws on screen: the always-on honest line, a server message, the glider prompt */
+export function hudOverlay() {
+  return {
+    active: idle ? '' : feature('activeLine') ? say('activeLine') : '',
+    msg: idle ? (refusedNote || say('idle')) : hudMsg && clock < hudMsg.until ? hudMsg.text : '',
+    prompt: !idle && promptUntil > clock ? say('gliderPrompt') : '',
+    info: settingsInfo()
+  }
 }

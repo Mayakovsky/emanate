@@ -4,6 +4,7 @@ import { engine, Transform, MeshRenderer, Material, AudioSource, MaterialTranspa
 import { Vector3, Quaternion, Color4 } from '@dcl/sdk/math'
 import { SLOT_TABLE, SLOT_LOOP } from './audioSlots'
 import { PACKED } from './audioPacked'
+import { FXS, FEATURES, SOUNDS } from './settings'
 import { ArrowChannel, arrowHeadingDeg, arrowSpeed, chevronOffsets, RULES, type ArrowKind, type Vec } from './logic'
 
 export const COLORS: Record<ArrowKind, Color4> = {
@@ -27,6 +28,25 @@ const toneOf = new Map<string, string | null>(SLOT_TABLE)
 export const remoteAudio: Record<string, string> = {} // slot id -> url from the server manifest
 export const audioStats = { slots: SLOT_TABLE.length, remote: 0, packed: Object.keys(PACKED).length, played: 0, lastSlot: '', lastSource: '' }
 
+// ---- the sound library in the zip (round 23): original generated tones, selectable by name from the server ----
+export const LIB_TONES = ['cue_event', 'cue_good', 'cue_bad', 'cue_warn', 'cue_alert', 'cue_round_start', 'cue_round_end', 'cue_charge_a', 'cue_charge_b', 'cue_charge_c', 'cue_lobby', 'cue_burst',
+  'cue_rift', 'cue_plume', 'cue_trap', 'cue_pickup', 'cue_power_up', 'cue_power_down', 'cue_glide', 'cue_lift', 'cue_teleport', 'cue_tick', 'cue_low', 'cue_high',
+  'spare_01', 'spare_02', 'spare_03', 'spare_04', 'spare_05', 'spare_06', 'spare_07', 'spare_08'] as const
+const libEntities = new Map<string, Entity>()
+const libArmed = new Set<string>()
+export function playLib(name: string) {
+  if ((FEATURES as Record<string, number>).sounds === 0) return
+  if (!(LIB_TONES as readonly string[]).includes(name)) return
+  let e = libEntities.get(name)
+  if (!e) {
+    e = engine.addEntity()
+    Transform.create(e, { position: Vector3.create(0, 0, 0) })
+    AudioSource.create(e, { audioClipUrl: `audio/${name}.wav`, playing: false, loop: false, volume: 0.6, global: true })
+    libEntities.set(name, e)
+  }
+  AudioSource.getMutable(e).playing = false
+  libArmed.add(name)
+}
 export function initSounds() {
   for (const n of TONE_NAMES) {
     const e = engine.addEntity()
@@ -56,7 +76,12 @@ export function slotSource(id: string): 'server' | 'packed' | 'tone' | 'silent' 
   if (PACKED[id]) return 'packed'
   return toneOf.get(id) ? 'tone' : 'silent'
 }
-export function playSlot(id: string) {
+export function playSlot(id0: string) {
+  if ((FEATURES as Record<string, number>).sounds === 0) return
+  // round 23: the server may remap which sound an event plays ("" = silent, "lib:<name>" = a tone of the library in the zip)
+  const id = SOUNDS[id0] ?? id0
+  if (id === '') return
+  if (id.startsWith('lib:')) return playLib(id.slice(4))
   const src = slotSource(id)
   audioStats.played++
   audioStats.lastSlot = id
@@ -83,6 +108,8 @@ export function playSound(n: SoundName) {
   armed.add('t:' + n + '|' + n)
 }
 export function soundsUpdate() {
+  for (const n of libArmed) { const e = libEntities.get(n); if (e) AudioSource.getMutable(e).playing = true }
+  libArmed.clear()
   if (armed.size === 0) return
   for (const k of armed) {
     const [key, id] = k.split('|')
@@ -93,10 +120,9 @@ export function soundsUpdate() {
 }
 
 // ---------------- tracking arrows >>> ----------------
-const CHEVRONS = 6
-const SPACING = 2.4
-const START = 1.8 // first chevron this far ahead of the feet
-const MAX_LEN = START + CHEVRONS * SPACING
+const CHEV_MAX = 10 // chevrons built per arrow (the settings may use fewer, never more)
+const chevN = () => Math.round(Math.max(2, Math.min(CHEV_MAX, FXS.chevrons)))
+const maxLen = () => FXS.chevronStart + chevN() * FXS.chevronSpacing
 interface Chevron { root: Entity; a: Entity; b: Entity }
 
 function makeChevron(color: Color4): Chevron {
@@ -128,7 +154,7 @@ export class Arrows {
     this.runs = { red: mk('red'), pink: mk('pink'), white: mk('white'), purple: mk('purple'), yellow: mk('yellow') }
   }
   private ensure(r: ArrowRun) {
-    if (!r.chevrons) r.chevrons = Array.from({ length: CHEVRONS }, () => makeChevron(COLORS[r.kind]))
+    if (!r.chevrons) r.chevrons = Array.from({ length: CHEV_MAX }, () => makeChevron(COLORS[r.kind]))
     return r.chevrons
   }
   // draw every active channel at the wearer's feet; airborne or not, the arrows lie flat at foot level, pointing level
@@ -156,17 +182,17 @@ export class Arrows {
         const left = Math.max(0, r.sputterUntil - now)
         r.phase += dt * 9
         const alive = left > 0
-        offs = chevronOffsets(CHEVRONS, SPACING, 0, START, MAX_LEN).map((o, i) => ({
+        offs = chevronOffsets(chevN(), FXS.chevronSpacing, 0, FXS.chevronStart, maxLen()).map((o, i) => ({
           s: o.s,
           fade: alive && Math.sin(r.phase * (1.7 + i * 0.9) + i * 2.1) > 0.35 ? o.fade * Math.min(1, left / 0.4) * 0.8 : 0
         }))
       } else {
         r.phase += dt * arrowSpeed(d)
-        offs = chevronOffsets(CHEVRONS, SPACING, r.phase, START, Math.min(MAX_LEN, Math.max(2.5, d - 0.5)))
+        offs = chevronOffsets(chevN(), FXS.chevronSpacing, r.phase, FXS.chevronStart, Math.min(maxLen(), Math.max(2.5, d - 0.5)))
       }
       for (let i = 0; i < chevs.length; i++) {
         const t = Transform.getMutable(chevs[i].root)
-        const o = offs[i]
+        const o = offs[i] ?? { s: 0, fade: 0 }
         t.position = Vector3.create(me.x + fwd.x * o.s, me.y + 0.06, me.z + fwd.z * o.s) // flat at foot level (no ground following; Forces judges slopes)
         t.rotation = rot
         const sc = 1.3 * o.fade
@@ -176,22 +202,28 @@ export class Arrows {
   }
 }
 
-// ---------------- plumes: a column of smoke rising from the trigger point, 14 s ----------------
-const PUFFS = 12
-const PLUME_HEIGHT = 120
+// ---------------- plumes: a column of smoke that rises and fades, 14 s (round 23: all sizes and counts come from the settings) ----------------
 interface PlumeVis { id: number | string; base: Vec; born: number; puffs: Entity[] }
+const PUFF_COLORS = [Color4.create(1, 0.12, 0.04, 0.9), Color4.create(1, 0.45, 0.08, 0.85), Color4.create(0.12, 0.1, 0.1, 0.75)]
+// the colour kind of puff i: red, orange and smoke in the proportions the settings give
+function puffKind(i: number): number {
+  const w = [Math.max(0, FXS.plumeRed), Math.max(0, FXS.plumeOrange), Math.max(0, FXS.plumeSmoke)]
+  const sum = w[0]! + w[1]! + w[2]! || 1
+  const f = ((i * 0.618034) % 1) * sum // a low-discrepancy spread, so the kinds mix along the column
+  return f < w[0]! ? 0 : f < w[0]! + w[1]! ? 1 : 2
+}
 export class Plumes {
   list = new Map<number | string, PlumeVis>()
   spawn(id: number | string, base: Vec, ageSec: number, now: number) {
     if (this.list.has(id)) return
     const puffs: Entity[] = []
-    for (let i = 0; i < PUFFS; i++) {
+    const n = Math.round(Math.max(4, Math.min(48, FXS.plumePuffs)))
+    for (let i = 0; i < n; i++) {
       const e = engine.addEntity()
       Transform.create(e, { position: Vector3.create(base.x, base.y, base.z), scale: HIDDEN })
       MeshRenderer.setSphere(e)
-      // fiery red and smoky (a placeholder until skinned): glowing red-orange puffs alternate with dark smoke
-      if (i % 2 === 0) Material.setPbrMaterial(e, { albedoColor: Color4.create(0.95, 0.22, 0.06, 0.7), emissiveColor: Color4.create(1, 0.3, 0.05, 1), emissiveIntensity: 1.6, transparencyMode: MaterialTransparencyMode.MTM_ALPHA_BLEND, metallic: 0, roughness: 1 })
-      else Material.setPbrMaterial(e, { albedoColor: Color4.create(0.22, 0.2, 0.2, 0.6), transparencyMode: MaterialTransparencyMode.MTM_ALPHA_BLEND, metallic: 0, roughness: 1 })
+      // drawn UNLIT so the colours read the same in daylight and at night (lit glowing puffs washed out to a pale grey ball in the real client)
+      Material.setBasicMaterial(e, { diffuseColor: PUFF_COLORS[puffKind(i)]! })
       puffs.push(e)
     }
     this.list.set(id, { id, base, born: now - ageSec, puffs })
@@ -204,6 +236,7 @@ export class Plumes {
     this.list.delete(id)
   }
   update(now: number) {
+    const H = FXS.plumeHeight
     for (const [id, p] of this.list) {
       const age = now - p.born
       const left = RULES.plumeSeconds - age
@@ -211,14 +244,17 @@ export class Plumes {
         this.remove(id, p)
         continue
       }
-      const grow = Math.min(1, age / 0.6)
-      const fade = Math.min(1, left / 2)
-      for (let i = 0; i < PUFFS; i++) {
-        const y = (age * 9 + (i * PLUME_HEIGHT) / PUFFS) % PLUME_HEIGHT
-        const h = y / PLUME_HEIGHT
-        const r = (1.6 + 4.5 * h) * grow * fade
+      const n = p.puffs.length
+      const grow = Math.min(1, age / 0.6) // swells in
+      const fadeEnd = Math.min(1, left / 2) // shrinks away over the last 2 s
+      for (let i = 0; i < n; i++) {
+        const y = (age * FXS.plumeRise + (i * H) / n) % H
+        const h = y / H
+        // a puff rises, swells, then dwindles toward the top: smoke that thins out (shrinking is the fade; no transparency is needed)
+        const thin = 1 - 0.9 * h * h
+        const r = (FXS.plumeBase + FXS.plumeGrow * h) * grow * fadeEnd * thin
         const t = Transform.getMutable(p.puffs[i])
-        t.position = Vector3.create(p.base.x + Math.sin(age * 0.7 + i * 1.3) * (0.6 + 2.5 * h), p.base.y + y, p.base.z + Math.cos(age * 0.6 + i * 1.7) * (0.6 + 2.5 * h))
+        t.position = Vector3.create(p.base.x + Math.sin(age * 0.7 + i * 1.3) * (0.6 + FXS.plumeSway * h), p.base.y + y, p.base.z + Math.cos(age * 0.6 + i * 1.7) * (0.6 + FXS.plumeSway * h))
         t.scale = Vector3.create(r, r, r)
       }
     }
@@ -823,3 +859,97 @@ export class StandIn {
     r.scale = Vector3.create(0.7, 0.04, 0.7)
   }
 }
+
+// ---------------- the effect library (round 23): primitives the server can spawn by id with parameters ----------------
+// sphere, ring, column, pulse, spark, smoke, arrow: each is drawn from plain meshes with unlit colour; shrinking is the fade (no transparency needed).
+export const FX_KINDS = ['sphere', 'ring', 'column', 'pulse', 'spark', 'smoke', 'arrow', 'rift'] as const
+export const FX_COLORS: Record<string, Color4> = {
+  red: Color4.create(1, 0.12, 0.08, 1), orange: Color4.create(1, 0.5, 0.1, 1), yellow: Color4.create(1, 0.9, 0.15, 1), green: Color4.create(0.2, 0.9, 0.3, 1),
+  blue: Color4.create(0.2, 0.5, 1, 1), cyan: Color4.create(0.2, 0.9, 1, 1), purple: Color4.create(0.62, 0.2, 1, 1), pink: Color4.create(1, 0.35, 0.75, 1),
+  white: Color4.create(1, 1, 1, 1), black: Color4.create(0.05, 0.05, 0.07, 1), grey: Color4.create(0.4, 0.4, 0.44, 1), smoke: Color4.create(0.12, 0.1, 0.1, 1)
+}
+interface FxPart { e: Entity; kind: 'sphere' | 'cyl'; ox: number; oy: number; oz: number; vx: number; vy: number; vz: number; s0: number; ph: number }
+interface FxItem { born: number; seconds: number; kind: string; at: Vec; size: number; parts: FxPart[]; height: number; heading: number }
+const FX_MAX_ITEMS = 24
+const FX_MAX_PARTS = 160
+export class FxLib {
+  items: FxItem[] = []
+  private parts = 0
+  private mk(color: Color4, cyl = false, topR = 1): Entity {
+    const e = engine.addEntity()
+    Transform.create(e, { position: HIDDEN, scale: HIDDEN })
+    if (cyl) MeshRenderer.setCylinder(e, 0.5, topR * 0.5)
+    else MeshRenderer.setSphere(e)
+    Material.setBasicMaterial(e, { diffuseColor: color })
+    this.parts++
+    return e
+  }
+  /** at: scene-local position. p: size (m), seconds, color (name or [r,g,b]), n (count), height, heading (deg, for arrow). Unknown kinds are ignored. */
+  spawn(kind: string, at: Vec, now: number, p: { size?: number; seconds?: number; color?: unknown; n?: number; height?: number; heading?: number } = {}): boolean {
+    if (!(FX_KINDS as readonly string[]).includes(kind)) return false
+    if (this.items.length >= FX_MAX_ITEMS) this.remove(this.items[0]!)
+    const size = Math.max(0.2, Math.min(60, Number(p.size ?? 3)))
+    const seconds = Math.max(0.3, Math.min(60, Number(p.seconds ?? 3)))
+    const n = Math.round(Math.max(1, Math.min(40, Number(p.n ?? 12))))
+    const height = Math.max(0.5, Math.min(200, Number(p.height ?? 20)))
+    let color = FX_COLORS.white!
+    if (typeof p.color === 'string' && FX_COLORS[p.color]) color = FX_COLORS[p.color]!
+    else if (Array.isArray(p.color) && p.color.length >= 3) color = Color4.create(clamp01(+p.color[0]), clamp01(+p.color[1]), clamp01(+p.color[2]), 1)
+    const parts: FxPart[] = []
+    const add = (e: Entity, kind2: 'sphere' | 'cyl', ox = 0, oy = 0, oz = 0, vx = 0, vy = 0, vz = 0, s0 = 1, ph = 0) => { if (this.parts <= FX_MAX_PARTS) parts.push({ e, kind: kind2, ox, oy, oz, vx, vy, vz, s0, ph }) }
+    if (kind === 'sphere') add(this.mk(color), 'sphere')
+    else if (kind === 'ring' || kind === 'pulse') for (let i = 0; i < 20; i++) { const a = (i / 20) * Math.PI * 2; add(this.mk(color), 'sphere', Math.cos(a), 0, Math.sin(a), 0, 0, 0, 0.35) }
+    else if (kind === 'column') add(this.mk(color, true), 'cyl')
+    else if (kind === 'spark') for (let i = 0; i < n; i++) { const a = Math.random() * Math.PI * 2, up = 0.4 + Math.random(); add(this.mk(color), 'sphere', 0, 0, 0, Math.cos(a) * size, up * size * 1.5, Math.sin(a) * size, 0.3 + Math.random() * 0.3) }
+    else if (kind === 'smoke') for (let i = 0; i < n; i++) add(this.mk(i % 3 === 0 ? FX_COLORS.red! : i % 3 === 1 ? FX_COLORS.orange! : FX_COLORS.smoke!), 'sphere', 0, 0, 0, 0, 0, 0, 1, i / n)
+    else if (kind === 'arrow') { add(this.mk(color, true), 'cyl', 0, 0, 0, 0, 0, 0, 0.4); add(this.mk(color, true, 0), 'cyl', 0, 0, 0, 0, 0, 0, 1) }
+    else if (kind === 'rift') {
+      // the Rift opening: a dark column splits upward, three rings roll out along the ground, sparks burst from the base
+      add(this.mk(FX_COLORS.black!, true), 'cyl', 0, 0, 0, 0, 0, 0, 1, 0)
+      add(this.mk(color, true), 'cyl', 0, 0, 0, 0, 0, 0, 0.4, 1)
+      for (let r = 0; r < 3; r++) for (let i = 0; i < 16; i++) { const a = (i / 16) * Math.PI * 2; add(this.mk(color), 'sphere', Math.cos(a), 0, Math.sin(a), 0, 0, 0, 0.5, 10 + r) }
+      for (let i = 0; i < 14; i++) { const a = Math.random() * Math.PI * 2; add(this.mk(FX_COLORS.yellow!), 'sphere', 0, 0, 0, Math.cos(a) * size * 0.5, size * (1 + Math.random()), Math.sin(a) * size * 0.5, 0.3, 20) }
+    }
+    this.items.push({ born: now, seconds, kind, at: { ...at }, size, parts, height, heading: Number(p.heading ?? 0) })
+    return true
+  }
+  private remove(it: FxItem) {
+    for (const q of it.parts) { engine.removeEntity(q.e); this.parts-- }
+    this.items.splice(this.items.indexOf(it), 1)
+  }
+  clear() { for (const it of [...this.items]) this.remove(it) }
+  update(now: number) {
+    for (const it of [...this.items]) {
+      const age = now - it.born
+      if (age >= it.seconds) { this.remove(it); continue }
+      const u = age / it.seconds // 0..1
+      const fade = u > 0.7 ? Math.max(0, (1 - u) / 0.3) : 1 // shrink away over the last 30 %
+      const grow = Math.min(1, age / 0.25)
+      for (const q of it.parts) {
+        const t = Transform.getMutable(q.e)
+        const size = it.size
+        if (it.kind === 'sphere') { const r = size * (0.85 + 0.15 * Math.sin(age * 6)) * grow * fade; t.position = Vector3.create(it.at.x, it.at.y + r * 0.5, it.at.z); t.scale = Vector3.create(r, r, r) }
+        else if (it.kind === 'ring') { const sc = size * 0.18 * fade; t.position = Vector3.create(it.at.x + q.ox * size, it.at.y + 0.3, it.at.z + q.oz * size); t.scale = Vector3.create(sc, sc, sc) }
+        else if (it.kind === 'pulse') { const rad = size * u; const sc = size * 0.2 * fade; t.position = Vector3.create(it.at.x + q.ox * rad, it.at.y + 0.3, it.at.z + q.oz * rad); t.scale = Vector3.create(sc, sc, sc) }
+        else if (it.kind === 'column') { const h = it.height * grow; t.position = Vector3.create(it.at.x, it.at.y + h / 2, it.at.z); t.scale = Vector3.create(size * fade, h, size * fade) }
+        else if (it.kind === 'spark') { const g = 14; const x = it.at.x + q.vx * age, z = it.at.z + q.vz * age, y = it.at.y + q.vy * age - 0.5 * g * age * age; const sc = q.s0 * fade * (it.size * 0.2); t.position = Vector3.create(x, Math.max(it.at.y, y), z); t.scale = y < it.at.y - 0.2 ? HIDDEN : Vector3.create(sc, sc, sc) }
+        else if (it.kind === 'smoke') { const rise = 8 + size; const y = ((age * rise + q.ph * it.height) % it.height); const h = y / it.height; const r = size * (0.4 + 0.9 * h) * grow * fade * (1 - 0.8 * h * h); t.position = Vector3.create(it.at.x + Math.sin(age * 0.8 + q.ph * 9) * (0.4 + h * size * 0.6), it.at.y + y, it.at.z + Math.cos(age * 0.7 + q.ph * 7) * (0.4 + h * size * 0.6)); t.scale = Vector3.create(r, r, r) }
+        else if (it.kind === 'arrow') {
+          const rot = Quaternion.fromEulerDegrees(90, it.heading, 0)
+          const dir = { x: Math.sin((it.heading * Math.PI) / 180), z: Math.cos((it.heading * Math.PI) / 180) }
+          const isHead = q.s0 === 1
+          const off = isHead ? size * 1.0 : size * 0.4
+          t.position = Vector3.create(it.at.x + dir.x * off, it.at.y + 0.5, it.at.z + dir.z * off); t.rotation = rot
+          const w = (isHead ? size * 0.5 : size * 0.18) * fade; t.scale = Vector3.create(w, isHead ? size * 0.6 : size * 0.8, w)
+        } else if (it.kind === 'rift') {
+          const dur = it.seconds
+          if (q.ph === 0) { const h = Math.min(1, age / (dur * 0.25)) * it.height; t.position = Vector3.create(it.at.x, it.at.y + h / 2, it.at.z); t.scale = Vector3.create(size * 0.5 * fade, h, size * 0.5 * fade) } // the dark column
+          else if (q.ph === 1) { const h = Math.min(1, age / (dur * 0.25)) * it.height; t.position = Vector3.create(it.at.x, it.at.y + h / 2, it.at.z); t.scale = Vector3.create(size * 0.12 * fade, h * 1.01, size * 0.12 * fade) } // the bright core
+          else if (q.ph >= 10 && q.ph < 20) { const k = q.ph - 10; const t0 = 0.15 + k * 0.2; const v = Math.max(0, (age / dur - t0) / (1 - t0)); const rad = size * v * 1.6; const sc = size * 0.14 * fade * (v > 0 ? 1 : 0); t.position = Vector3.create(it.at.x + q.ox * rad, it.at.y + 0.3, it.at.z + q.oz * rad); t.scale = Vector3.create(sc, sc, sc) }
+          else { const g = 12; const a2 = Math.max(0, age - dur * 0.2); const y = it.at.y + q.vy * a2 - 0.5 * g * a2 * a2; const sc = 0.5 * fade; t.position = Vector3.create(it.at.x + q.vx * a2, Math.max(it.at.y, y), it.at.z + q.vz * a2); t.scale = age < dur * 0.2 || y < it.at.y ? HIDDEN : Vector3.create(sc, sc, sc) }
+        }
+      }
+    }
+  }
+}
+const clamp01 = (v: number) => (Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0)
