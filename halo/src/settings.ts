@@ -6,7 +6,7 @@
 import { RULES } from './logic'
 
 export const PROTOCOL_VERSION = 1 // the command vocabulary and settings schema this halo understands
-export const BUILD_ID = 'c23d' // the halo build (set at release; the server logs it and may refuse an old one)
+export const BUILD_ID = 'c24c' // the halo build (set at release; the server logs it and may refuse an old one)
 
 // ---- the powers (index.ts) ----
 export const POWER = {
@@ -20,8 +20,8 @@ export const POWER = {
 // ---- effects (fx.ts) ----
 export const FXS = {
   chevrons: 6, chevronSpacing: 2.4, chevronStart: 1.8, // the tracking arrows
-  plumePuffs: 24, plumeHeight: 120, plumeRise: 9, plumeBase: 1.2, plumeGrow: 3.0, plumeSway: 2.5, // the plume (smoke that rises and fades)
-  plumeRed: 1, plumeOrange: 1, plumeSmoke: 1, // relative number of red, orange and smoke puffs
+  plumePuffs: 40, plumeHeight: 100, plumeRise: 6, plumeBase: 3.0, plumeGrow: 6.0, plumeSway: 2.5, // the plume (smoke that rises and fades)
+  plumeRed: 1, plumeOrange: 1, plumeSmoke: 0.35, // relative number of red, orange and smoke puffs
   riftSeconds: 3, riftRadius: 14, // the Rift opening effect at the lobby end
   liftAltitudes: 4, // how many lift targets (informational)
   gliderPrompt: 1, gliderPromptSeconds: 4 // show the "hold JUMP to open the glider" line for this long after a tier-3 wearer leaves the ground

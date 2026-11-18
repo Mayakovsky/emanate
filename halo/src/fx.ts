@@ -204,7 +204,17 @@ export class Arrows {
 
 // ---------------- plumes: a column of smoke that rises and fades, 14 s (round 23: all sizes and counts come from the settings) ----------------
 interface PlumeVis { id: number | string; base: Vec; born: number; puffs: Entity[] }
-const PUFF_COLORS = [Color4.create(1, 0.12, 0.04, 0.9), Color4.create(1, 0.45, 0.08, 0.85), Color4.create(0.12, 0.1, 0.1, 0.75)]
+const PUFF_COLORS = [Color4.create(1, 0.1, 0.03, 1), Color4.create(1, 0.4, 0.06, 1), Color4.create(0.32, 0.05, 0.03, 1)]
+/** soft translucent fiery material: a see-through body with a warm glow of its own, so overlapping puffs blend into smoke and still read red in daylight */
+let SOFT_VARIANT = -1 // test hook (round 24): -1 = the chosen recipe; 0..3 = candidate recipes for one look test
+export const setSoftVariant = (v: number) => { SOFT_VARIANT = v }
+export function softMat(e: Entity, c: Color4, alpha: number, glow: number, variant = SOFT_VARIANT) {
+  const v = variant < 0 ? 0 : variant
+  if (v === 0) Material.setPbrMaterial(e, { albedoColor: Color4.create(0, 0, 0, alpha), emissiveColor: Color4.create(c.r, c.g, c.b, 1), emissiveIntensity: glow, directIntensity: 0, specularIntensity: 0, transparencyMode: MaterialTransparencyMode.MTM_ALPHA_BLEND, metallic: 0, roughness: 1 })
+  else if (v === 1) Material.setPbrMaterial(e, { albedoColor: Color4.create(c.r, c.g, c.b, alpha), emissiveColor: Color4.create(c.r, c.g, c.b, 1), emissiveIntensity: glow * 2, directIntensity: 0, specularIntensity: 0, transparencyMode: MaterialTransparencyMode.MTM_ALPHA_BLEND, metallic: 0, roughness: 1 })
+  else if (v === 2) Material.setBasicMaterial(e, { diffuseColor: Color4.create(c.r, c.g, c.b, alpha) })
+  else Material.setPbrMaterial(e, { albedoColor: Color4.create(c.r, c.g, c.b, Math.min(1, alpha * 1.5)), emissiveColor: Color4.create(c.r, c.g, c.b, 1), emissiveIntensity: 0.6, directIntensity: 0, specularIntensity: 0, transparencyMode: MaterialTransparencyMode.MTM_ALPHA_BLEND, metallic: 0, roughness: 1 })
+}
 // the colour kind of puff i: red, orange and smoke in the proportions the settings give
 function puffKind(i: number): number {
   const w = [Math.max(0, FXS.plumeRed), Math.max(0, FXS.plumeOrange), Math.max(0, FXS.plumeSmoke)]
@@ -222,8 +232,8 @@ export class Plumes {
       const e = engine.addEntity()
       Transform.create(e, { position: Vector3.create(base.x, base.y, base.z), scale: HIDDEN })
       MeshRenderer.setSphere(e)
-      // drawn UNLIT so the colours read the same in daylight and at night (lit glowing puffs washed out to a pale grey ball in the real client)
-      Material.setBasicMaterial(e, { diffuseColor: PUFF_COLORS[puffKind(i)]! })
+      // soft translucent puffs with their own warm glow (round 24: smoke, not balls)
+      softMat(e, PUFF_COLORS[puffKind(i)]!, 0.72, 1.5, SOFT_VARIANT === 9 ? i % 4 : SOFT_VARIANT)
       puffs.push(e)
     }
     this.list.set(id, { id, base, born: now - ageSec, puffs })
@@ -862,25 +872,27 @@ export class StandIn {
 
 // ---------------- the effect library (round 23): primitives the server can spawn by id with parameters ----------------
 // sphere, ring, column, pulse, spark, smoke, arrow: each is drawn from plain meshes with unlit colour; shrinking is the fade (no transparency needed).
-export const FX_KINDS = ['sphere', 'ring', 'column', 'pulse', 'spark', 'smoke', 'arrow', 'rift'] as const
+export const FX_KINDS = ['sphere', 'ring', 'column', 'pulse', 'spark', 'smoke', 'arrow', 'rift', 'portal'] as const
 export const FX_COLORS: Record<string, Color4> = {
   red: Color4.create(1, 0.12, 0.08, 1), orange: Color4.create(1, 0.5, 0.1, 1), yellow: Color4.create(1, 0.9, 0.15, 1), green: Color4.create(0.2, 0.9, 0.3, 1),
   blue: Color4.create(0.2, 0.5, 1, 1), cyan: Color4.create(0.2, 0.9, 1, 1), purple: Color4.create(0.62, 0.2, 1, 1), pink: Color4.create(1, 0.35, 0.75, 1),
   white: Color4.create(1, 1, 1, 1), black: Color4.create(0.05, 0.05, 0.07, 1), grey: Color4.create(0.4, 0.4, 0.44, 1), smoke: Color4.create(0.12, 0.1, 0.1, 1)
 }
-interface FxPart { e: Entity; kind: 'sphere' | 'cyl'; ox: number; oy: number; oz: number; vx: number; vy: number; vz: number; s0: number; ph: number }
-interface FxItem { born: number; seconds: number; kind: string; at: Vec; size: number; parts: FxPart[]; height: number; heading: number }
+interface FxPart { e: Entity; kind: 'sphere' | 'cyl' | 'box'; ox: number; oy: number; oz: number; vx: number; vy: number; vz: number; s0: number; ph: number }
+interface FxItem { born: number; seconds: number; kind: string; at: Vec; size: number; parts: FxPart[]; height: number; heading: number; jt?: number; jit?: number[] }
 const FX_MAX_ITEMS = 24
 const FX_MAX_PARTS = 160
 export class FxLib {
   items: FxItem[] = []
   private parts = 0
-  private mk(color: Color4, cyl = false, topR = 1): Entity {
+  private mk(color: Color4, cyl = false, topR = 1, soft = 0, box = false): Entity {
     const e = engine.addEntity()
     Transform.create(e, { position: HIDDEN, scale: HIDDEN })
-    if (cyl) MeshRenderer.setCylinder(e, 0.5, topR * 0.5)
+    if (box) MeshRenderer.setBox(e)
+    else if (cyl) MeshRenderer.setCylinder(e, 0.5, topR * 0.5)
     else MeshRenderer.setSphere(e)
-    Material.setBasicMaterial(e, { diffuseColor: color })
+    if (soft > 0) softMat(e, color, soft, 1.5)
+    else Material.setBasicMaterial(e, { diffuseColor: color })
     this.parts++
     return e
   }
@@ -896,13 +908,21 @@ export class FxLib {
     if (typeof p.color === 'string' && FX_COLORS[p.color]) color = FX_COLORS[p.color]!
     else if (Array.isArray(p.color) && p.color.length >= 3) color = Color4.create(clamp01(+p.color[0]), clamp01(+p.color[1]), clamp01(+p.color[2]), 1)
     const parts: FxPart[] = []
-    const add = (e: Entity, kind2: 'sphere' | 'cyl', ox = 0, oy = 0, oz = 0, vx = 0, vy = 0, vz = 0, s0 = 1, ph = 0) => { if (this.parts <= FX_MAX_PARTS) parts.push({ e, kind: kind2, ox, oy, oz, vx, vy, vz, s0, ph }) }
+    const add = (e: Entity, kind2: 'sphere' | 'cyl' | 'box', ox = 0, oy = 0, oz = 0, vx = 0, vy = 0, vz = 0, s0 = 1, ph = 0) => { if (this.parts <= FX_MAX_PARTS) parts.push({ e, kind: kind2, ox, oy, oz, vx, vy, vz, s0, ph }) }
     if (kind === 'sphere') add(this.mk(color), 'sphere')
     else if (kind === 'ring' || kind === 'pulse') for (let i = 0; i < 20; i++) { const a = (i / 20) * Math.PI * 2; add(this.mk(color), 'sphere', Math.cos(a), 0, Math.sin(a), 0, 0, 0, 0.35) }
     else if (kind === 'column') add(this.mk(color, true), 'cyl')
     else if (kind === 'spark') for (let i = 0; i < n; i++) { const a = Math.random() * Math.PI * 2, up = 0.4 + Math.random(); add(this.mk(color), 'sphere', 0, 0, 0, Math.cos(a) * size, up * size * 1.5, Math.sin(a) * size, 0.3 + Math.random() * 0.3) }
-    else if (kind === 'smoke') for (let i = 0; i < n; i++) add(this.mk(i % 3 === 0 ? FX_COLORS.red! : i % 3 === 1 ? FX_COLORS.orange! : FX_COLORS.smoke!), 'sphere', 0, 0, 0, 0, 0, 0, 1, i / n)
+    else if (kind === 'smoke') for (let i = 0; i < n; i++) add(this.mk(i % 3 === 0 ? FX_COLORS.red! : i % 3 === 1 ? FX_COLORS.orange! : PUFF_COLORS[2]!, false, 1, 0.72), 'sphere', 0, 0, 0, 0, 0, 0, 1, i / n)
     else if (kind === 'arrow') { add(this.mk(color, true), 'cyl', 0, 0, 0, 0, 0, 0, 0.4); add(this.mk(color, true, 0), 'cyl', 0, 0, 0, 0, 0, 0, 1) }
+    else if (kind === 'portal') {
+      // round 24: a vertical oval of fire and light with an irregular flickering edge and lightning bars around it. size = half the width (m), height = the full height (m)
+      add(this.mk(color, false, 1, 0.6), 'sphere', 0, 0, 0, 0, 0, 0, 1, 30)
+      add(this.mk(FX_COLORS.orange!, false, 1, 0.7), 'sphere', 0, 0, 0, 0, 0, 0, 1, 31)
+      add(this.mk(Color4.create(1, 0.88, 0.45, 1), false, 1, 0.9), 'sphere', 0, 0, 0, 0, 0, 0, 1, 32)
+      for (let i = 0; i < 24; i++) add(this.mk(i % 3 === 0 ? FX_COLORS.red! : i % 3 === 1 ? FX_COLORS.orange! : FX_COLORS.yellow!, false, 1, 0.8), 'sphere', 0, 0, 0, 0, 0, 0, i, 40)
+      for (let b = 0; b < 3; b++) for (let sg = 0; sg < 6; sg++) add(this.mk(b === 1 ? FX_COLORS.white! : FX_COLORS.cyan!, false, 1, 0, true), 'box', 0, 0, 0, 0, 0, 0, sg, 50 + b)
+    }
     else if (kind === 'rift') {
       // the Rift opening: a dark column splits upward, three rings roll out along the ground, sparks burst from the base
       add(this.mk(FX_COLORS.black!, true), 'cyl', 0, 0, 0, 0, 0, 0, 1, 0)
@@ -941,6 +961,26 @@ export class FxLib {
           const off = isHead ? size * 1.0 : size * 0.4
           t.position = Vector3.create(it.at.x + dir.x * off, it.at.y + 0.5, it.at.z + dir.z * off); t.rotation = rot
           const w = (isHead ? size * 0.5 : size * 0.18) * fade; t.scale = Vector3.create(w, isHead ? size * 0.6 : size * 0.8, w)
+        } else if (it.kind === 'portal') {
+          const H = it.height, A = size, cy = it.at.y + H / 2
+          const open = Math.min(1, age / 0.8) * fade
+          if (q.ph >= 30 && q.ph <= 32) {
+            const f = q.ph === 30 ? [1, 1, 0.5] : q.ph === 31 ? [0.82, 0.86, 0.45] : [0.55, 0.68, 0.4]
+            const br = 1 + 0.04 * Math.sin(age * 9 + q.ph)
+            t.position = Vector3.create(it.at.x, cy, it.at.z); t.scale = Vector3.create(2 * A * f[0]! * open * br, H * f[1]! * open * br, A * f[2]! * open)
+          } else if (q.ph === 40) {
+            const i = q.s0, a = (i / 24) * Math.PI * 2
+            const r = 1 + 0.16 * Math.sin(age * 5 + i * 2.1) + 0.1 * Math.sin(age * 11 + i) + ((i * 37) % 7) / 40
+            const sc = size * (0.55 + 0.3 * Math.sin(age * 8 + i)) * open
+            t.position = Vector3.create(it.at.x + A * r * Math.cos(a), cy + (H / 2) * r * Math.sin(a), it.at.z); t.scale = Vector3.create(sc, sc * 1.7, sc)
+          } else if (q.ph >= 50) {
+            if (!it.jit || age - (it.jt ?? -1) > 0.1) { it.jt = age; it.jit = Array.from({ length: 24 }, () => (Math.random() - 0.5) * 3) }
+            const b = q.ph - 50, side = b % 2 === 0 ? -1 : 1, y0 = cy + (b - 1) * H * 0.25
+            const pt = (k: number) => Vector3.create(it.at.x + side * (A * 0.95 + (k / 6) * (A * 0.8 + 5)) + it.jit![(b * 7 + k) % 24]! * (k === 0 ? 0 : 1), y0 + (k / 6) * H * 0.35 + it.jit![(b * 7 + k + 12) % 24]! * 0.6, it.at.z + (it.jit![(b * 5 + k + 6) % 24]! * 0.5))
+            const p0 = pt(q.s0), p1 = pt(q.s0 + 1), d = Vector3.subtract(p1, p0), len = Math.max(0.1, Vector3.length(d))
+            if (Math.random() < 0.12 || open < 0.5) t.scale = HIDDEN
+            else { t.position = Vector3.create((p0.x + p1.x) / 2, (p0.y + p1.y) / 2, (p0.z + p1.z) / 2); t.rotation = Quaternion.lookRotation(Vector3.normalize(d)); t.scale = Vector3.create(0.22, 0.22, len) }
+          }
         } else if (it.kind === 'rift') {
           const dur = it.seconds
           if (q.ph === 0) { const h = Math.min(1, age / (dur * 0.25)) * it.height; t.position = Vector3.create(it.at.x, it.at.y + h / 2, it.at.z); t.scale = Vector3.create(size * 0.5 * fade, h, size * 0.5 * fade) } // the dark column

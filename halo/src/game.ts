@@ -1019,7 +1019,8 @@ function runCommand(c: Record<string, unknown>) {
 }
 function riftOpening(at: Vec) {
   // the Rift opening as its own effect: the lobby bubble's centre
-  fxLib.spawn('rift', at, clock, { size: Math.max(2, FXS.riftRadius * 0.5), seconds: Math.max(1, FXS.riftSeconds), height: 70, color: 'purple' })
+  fxLib.spawn('portal', at, clock, { size: 5, seconds: 10, height: 18, color: 'red' })
+  fxLib.spawn('smoke', { x: at.x, y: at.y, z: at.z + 5 }, clock, { size: 5, seconds: 10, height: 200, n: 30 })
 }
 function gliderPrompt(airborne: boolean, tier: number) {
   if (airborne && !lastAirborne && tier >= 3 && FXS.gliderPrompt > 0) promptUntil = clock + FXS.gliderPromptSeconds
