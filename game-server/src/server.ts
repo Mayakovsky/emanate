@@ -296,6 +296,8 @@ export function startServer(port = PORT, match: Match = makeMatch((process.env.E
   const roamOn = process.env.EMANATE_SYNTH_ROAM === 'on'
   const memory = new Memory(path.join(ROOT, 'data', 'memory.json'))
   const halo = new HaloControl()
+  // round 24: standing halo settings from the environment (a JSON object, for example {"fx":{"plumePuffs":48}}): they survive a restart; admin halo-settings changes them live
+  try { if (process.env.EMANATE_HALO_SETTINGS) halo.set(JSON.parse(process.env.EMANATE_HALO_SETTINGS)) } catch (e) { console.error('[halo settings] ignored: not valid JSON') }
   // round 22: the retention the privacy notice promises (probe file 30 days, play records 90 days): at start and then daily
   const PROBE_FILE = path.join(LOGDIR, 'halo-probes.jsonl')
   const purgeAll = () => { try { const r = { probeLines: purgeProbes(PROBE_FILE, Date.now()), memory: memory.purge(Date.now()) }; if (r.probeLines || r.memory) console.log(JSON.stringify({ t: Date.now(), purged: r })) } catch (e) { console.error('[purge]', String((e as Error)?.message ?? e)) } }
