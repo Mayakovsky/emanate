@@ -13,6 +13,7 @@ import { ParcelSet, nearestEmptyParcel } from './geo.ts'
 import { simSynth, tailWslSynth, sendSynthCommand, setSynthTransport } from './synthfeed.ts'
 import { BridgeHub, parseSync } from './bridge.ts'
 import { RateLimiter, clientIp, safeEqual, cleanTick, BODY_CAP, DEFAULT_BODY_CAP, routePath, decodeSegment, publicBase } from './security.ts'
+import { planRift } from './rift.ts'
 import { SynthBrain, lookForRound, noWorld, type World } from './synthai.ts'
 import { exposureFactor } from './hiding.ts'
 import { buildManifest, readAudioFile } from './audioserve.ts'
@@ -390,6 +391,13 @@ export function startServer(port = PORT, match: Match = makeMatch((process.env.E
     for (const t of m.synthTeleports.splice(0)) {
       brain.reset()
       if (realSynth()) sendSynthCommand({ cmd: 'move', x: t.x, y: m.synth.y, z: t.z })
+    }
+    for (const r of m.rifts.splice(0)) {
+      // round 24: the Rift at the trigger (see rift.ts): the halo draws the portal and the smoke column; the Synth steps into it and is gone
+      const plan = planRift(r, Number(halo.overrides.power?.ceiling ?? 200))
+      for (const c of plan.halo) halo.command('all', c)
+      m.note('rift', { kind: r.kind, x: Math.round(plan.centre.x), y: Math.round(plan.centre.y), z: Math.round(plan.centre.z) })
+      if (realSynth()) for (const st of plan.synth) setTimeout(() => sendSynthCommand(st.cmd as any), st.afterMs).unref()
     }
     for (const line of m.synthSays.splice(0)) if (realSynth()) sendSynthCommand({ cmd: 'chat', text: line }) // the Synth speaks (the lobby call)
     const stageNow = m.synthStage()

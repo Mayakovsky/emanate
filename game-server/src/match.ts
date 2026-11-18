@@ -77,7 +77,7 @@ export class Match {
     if (this.cfg.lobbyEnabled) this.startLobby()
   }
 
-  private note(ev: string, data: Record<string, unknown> = {}) {
+  note(ev: string, data: Record<string, unknown> = {}) {
     this.log.push({ t: this.d.now(), ev, ...data })
     if (this.log.length > 500) this.log.shift()
   }
@@ -126,6 +126,7 @@ export class Match {
     this.bubble = null
     this.roundStart = now
     this.note('lobby-end', { count: inside.length, mode })
+    this.rifts.push({ kind: 'trigger', at: { ...this.synth } }) // the Rift opens where the Synth stands, in every mode
     for (const p of inside) p.queue.push({ ev: 'lobby-end', mode, count: inside.length })
     this.finishChoices()
     if (mode === 'multiplayer') this.balanceSides() // auto-balanced, at least 3 per side (6 or more players)
@@ -297,6 +298,7 @@ export class Match {
     this.held = { pos: { ...this.synth }, until: this.d.now() + 3000 }
   }
   synthTeleports: { x: number; z: number }[] = []
+  rifts: { kind: 'trigger' | 'helper-ending' | 'hunter-ending'; at: Vec }[] = [] // round 24: Rift triggers for the server to draw (the Synth's position and height at that moment)
   synthExposure = 1 // set by the Synth brain: how much brighter its effects are for halo wearers (v3: stronger while it hides inside built parcels)
   // after a teleport, feed positions that have not caught up (still near the old spot) are ignored for a moment
   held: { pos: Vec; until: number } | null = null
@@ -587,6 +589,7 @@ export class Match {
     this.endgame = { kind, x: nearest.x, z: nearest.z, winner: this.mode === 'multiplayer' ? winner : 'players', firstArrival: null, resolved: false }
     this.broadcast({ ev: 'endgame', kind, x: nearest.x, z: nearest.z })
     this.note('endgame', { kind, x: nearest.x, z: nearest.z })
+    this.rifts.push({ kind: kind === 'escape' ? 'helper-ending' : 'hunter-ending', at: { x: nearest.x, y: 0, z: nearest.z } })
   }
 
   // endgame arrival rule (UNCONFIRMED): majority of the side present, or anyone present once 30 s have passed since the first arrival

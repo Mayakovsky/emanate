@@ -204,6 +204,7 @@ export class Arrows {
 
 // ---------------- plumes: a column of smoke that rises and fades, 14 s (round 23: all sizes and counts come from the settings) ----------------
 interface PlumeVis { id: number | string; base: Vec; born: number; puffs: Entity[] }
+const CORE_COLORS = [Color4.create(1, 0.14, 0.02, 1), Color4.create(1, 0.5, 0.04, 1), Color4.create(0.42, 0.07, 0.03, 1)]
 const PUFF_COLORS = [Color4.create(1, 0.1, 0.03, 1), Color4.create(1, 0.4, 0.06, 1), Color4.create(0.32, 0.05, 0.03, 1)]
 /** soft translucent fiery material: a see-through body with a warm glow of its own, so overlapping puffs blend into smoke and still read red in daylight */
 let SOFT_VARIANT = -1 // test hook (round 24): -1 = the chosen recipe; 0..3 = candidate recipes for one look test
@@ -228,13 +229,17 @@ export class Plumes {
     if (this.list.has(id)) return
     const puffs: Entity[] = []
     const n = Math.round(Math.max(4, Math.min(48, FXS.plumePuffs)))
-    for (let i = 0; i < n; i++) {
-      const e = engine.addEntity()
-      Transform.create(e, { position: Vector3.create(base.x, base.y, base.z), scale: HIDDEN })
-      MeshRenderer.setSphere(e)
-      // soft translucent puffs with their own warm glow (round 24: smoke, not balls)
-      softMat(e, PUFF_COLORS[puffKind(i)]!, 0.72, 1.5, SOFT_VARIANT === 9 ? i % 4 : SOFT_VARIANT)
-      puffs.push(e)
+    // round 24: ONE look for day and night: a saturated, self-lit core (opaque, unlit) inside a larger translucent shell. The core keeps the fire colour in bright daylight and in the dark; the shell makes the edge soft.
+    for (let pass = 0; pass < 2; pass++) {
+      for (let i = 0; i < n; i++) {
+        const e = engine.addEntity()
+        Transform.create(e, { position: Vector3.create(base.x, base.y, base.z), scale: HIDDEN })
+        MeshRenderer.setSphere(e)
+        const k = puffKind(i)
+        if (pass === 0) softMat(e, PUFF_COLORS[k]!, 0.5, 1.5)
+        else Material.setBasicMaterial(e, { diffuseColor: CORE_COLORS[k]! })
+        puffs.push(e)
+      }
     }
     this.list.set(id, { id, base, born: now - ageSec, puffs })
   }
@@ -254,7 +259,7 @@ export class Plumes {
         this.remove(id, p)
         continue
       }
-      const n = p.puffs.length
+      const n = p.puffs.length / 2
       const grow = Math.min(1, age / 0.6) // swells in
       const fadeEnd = Math.min(1, left / 2) // shrinks away over the last 2 s
       for (let i = 0; i < n; i++) {
@@ -263,9 +268,13 @@ export class Plumes {
         // a puff rises, swells, then dwindles toward the top: smoke that thins out (shrinking is the fade; no transparency is needed)
         const thin = 1 - 0.9 * h * h
         const r = (FXS.plumeBase + FXS.plumeGrow * h) * grow * fadeEnd * thin
+        const pos = Vector3.create(p.base.x + Math.sin(age * 0.7 + i * 1.3) * (0.6 + FXS.plumeSway * h), p.base.y + y, p.base.z + Math.cos(age * 0.6 + i * 1.7) * (0.6 + FXS.plumeSway * h))
         const t = Transform.getMutable(p.puffs[i])
-        t.position = Vector3.create(p.base.x + Math.sin(age * 0.7 + i * 1.3) * (0.6 + FXS.plumeSway * h), p.base.y + y, p.base.z + Math.cos(age * 0.6 + i * 1.7) * (0.6 + FXS.plumeSway * h))
+        t.position = pos
         t.scale = Vector3.create(r, r, r)
+        const c = Transform.getMutable(p.puffs[i + n]!) // the core
+        c.position = pos
+        c.scale = Vector3.create(r * 0.55, r * 0.55, r * 0.55)
       }
     }
   }
@@ -913,14 +922,16 @@ export class FxLib {
     else if (kind === 'ring' || kind === 'pulse') for (let i = 0; i < 20; i++) { const a = (i / 20) * Math.PI * 2; add(this.mk(color), 'sphere', Math.cos(a), 0, Math.sin(a), 0, 0, 0, 0.35) }
     else if (kind === 'column') add(this.mk(color, true), 'cyl')
     else if (kind === 'spark') for (let i = 0; i < n; i++) { const a = Math.random() * Math.PI * 2, up = 0.4 + Math.random(); add(this.mk(color), 'sphere', 0, 0, 0, Math.cos(a) * size, up * size * 1.5, Math.sin(a) * size, 0.3 + Math.random() * 0.3) }
-    else if (kind === 'smoke') for (let i = 0; i < n; i++) add(this.mk(i % 3 === 0 ? FX_COLORS.red! : i % 3 === 1 ? FX_COLORS.orange! : PUFF_COLORS[2]!, false, 1, 0.72), 'sphere', 0, 0, 0, 0, 0, 0, 1, i / n)
+    else if (kind === 'smoke') for (let i = 0; i < n; i++) { add(this.mk(i % 3 === 0 ? FX_COLORS.red! : i % 3 === 1 ? FX_COLORS.orange! : PUFF_COLORS[2]!, false, 1, 0.5), 'sphere', 0, 0, 0, 0, 0, 0, 1, i / n); add(this.mk(CORE_COLORS[i % 3]!), 'sphere', 0, 0, 0, 0, 0, 0, 0.55, i / n) }
     else if (kind === 'arrow') { add(this.mk(color, true), 'cyl', 0, 0, 0, 0, 0, 0, 0.4); add(this.mk(color, true, 0), 'cyl', 0, 0, 0, 0, 0, 0, 1) }
     else if (kind === 'portal') {
       // round 24: a vertical oval of fire and light with an irregular flickering edge and lightning bars around it. size = half the width (m), height = the full height (m)
-      add(this.mk(color, false, 1, 0.6), 'sphere', 0, 0, 0, 0, 0, 0, 1, 30)
-      add(this.mk(FX_COLORS.orange!, false, 1, 0.7), 'sphere', 0, 0, 0, 0, 0, 0, 1, 31)
-      add(this.mk(Color4.create(1, 0.88, 0.45, 1), false, 1, 0.9), 'sphere', 0, 0, 0, 0, 0, 0, 1, 32)
-      for (let i = 0; i < 24; i++) add(this.mk(i % 3 === 0 ? FX_COLORS.red! : i % 3 === 1 ? FX_COLORS.orange! : FX_COLORS.yellow!, false, 1, 0.8), 'sphere', 0, 0, 0, 0, 0, 0, i, 40)
+      // layers, outermost first: a translucent glow, then three SATURATED self-lit (opaque, unlit) ellipsoids, each thicker in depth than the one outside it so the bright centre shows from both sides (one look for day and night)
+      add(this.mk(color, false, 1, 0.45), 'sphere', 0, 0, 0, 0, 0, 0, 1, 30)
+      add(this.mk(Color4.create(1, 0.2, 0.02, 1)), 'sphere', 0, 0, 0, 0, 0, 0, 1, 31)
+      add(this.mk(Color4.create(1, 0.55, 0.05, 1)), 'sphere', 0, 0, 0, 0, 0, 0, 1, 32)
+      add(this.mk(Color4.create(1, 0.93, 0.5, 1)), 'sphere', 0, 0, 0, 0, 0, 0, 1, 33)
+      for (let i = 0; i < 24; i++) add(this.mk(i % 3 === 0 ? FX_COLORS.red! : i % 3 === 1 ? FX_COLORS.orange! : FX_COLORS.yellow!), 'sphere', 0, 0, 0, 0, 0, 0, i, 40)
       for (let b = 0; b < 3; b++) for (let sg = 0; sg < 6; sg++) add(this.mk(b === 1 ? FX_COLORS.white! : FX_COLORS.cyan!, false, 1, 0, true), 'box', 0, 0, 0, 0, 0, 0, sg, 50 + b)
     }
     else if (kind === 'rift') {
@@ -953,7 +964,7 @@ export class FxLib {
         else if (it.kind === 'pulse') { const rad = size * u; const sc = size * 0.2 * fade; t.position = Vector3.create(it.at.x + q.ox * rad, it.at.y + 0.3, it.at.z + q.oz * rad); t.scale = Vector3.create(sc, sc, sc) }
         else if (it.kind === 'column') { const h = it.height * grow; t.position = Vector3.create(it.at.x, it.at.y + h / 2, it.at.z); t.scale = Vector3.create(size * fade, h, size * fade) }
         else if (it.kind === 'spark') { const g = 14; const x = it.at.x + q.vx * age, z = it.at.z + q.vz * age, y = it.at.y + q.vy * age - 0.5 * g * age * age; const sc = q.s0 * fade * (it.size * 0.2); t.position = Vector3.create(x, Math.max(it.at.y, y), z); t.scale = y < it.at.y - 0.2 ? HIDDEN : Vector3.create(sc, sc, sc) }
-        else if (it.kind === 'smoke') { const rise = 8 + size; const y = ((age * rise + q.ph * it.height) % it.height); const h = y / it.height; const r = size * (0.4 + 0.9 * h) * grow * fade * (1 - 0.8 * h * h); t.position = Vector3.create(it.at.x + Math.sin(age * 0.8 + q.ph * 9) * (0.4 + h * size * 0.6), it.at.y + y, it.at.z + Math.cos(age * 0.7 + q.ph * 7) * (0.4 + h * size * 0.6)); t.scale = Vector3.create(r, r, r) }
+        else if (it.kind === 'smoke') { const rise = 8 + size; const y = ((age * rise + q.ph * it.height) % it.height); const h = y / it.height; const r = size * (0.4 + 0.9 * h) * grow * fade * (1 - 0.8 * h * h); t.position = Vector3.create(it.at.x + Math.sin(age * 0.8 + q.ph * 9) * (0.4 + h * size * 0.6), it.at.y + y, it.at.z + Math.cos(age * 0.7 + q.ph * 7) * (0.4 + h * size * 0.6)); t.scale = Vector3.create(r * q.s0, r * q.s0, r * q.s0) }
         else if (it.kind === 'arrow') {
           const rot = Quaternion.fromEulerDegrees(90, it.heading, 0)
           const dir = { x: Math.sin((it.heading * Math.PI) / 180), z: Math.cos((it.heading * Math.PI) / 180) }
@@ -964,14 +975,14 @@ export class FxLib {
         } else if (it.kind === 'portal') {
           const H = it.height, A = size, cy = it.at.y + H / 2
           const open = Math.min(1, age / 0.8) * fade
-          if (q.ph >= 30 && q.ph <= 32) {
-            const f = q.ph === 30 ? [1, 1, 0.5] : q.ph === 31 ? [0.82, 0.86, 0.45] : [0.55, 0.68, 0.4]
+          if (q.ph >= 30 && q.ph <= 33) {
+            const f = q.ph === 30 ? [1.12, 1.08, 0.3] : q.ph === 31 ? [0.96, 0.94, 0.4] : q.ph === 32 ? [0.74, 0.76, 0.55] : [0.46, 0.55, 0.7]
             const br = 1 + 0.04 * Math.sin(age * 9 + q.ph)
             t.position = Vector3.create(it.at.x, cy, it.at.z); t.scale = Vector3.create(2 * A * f[0]! * open * br, H * f[1]! * open * br, A * f[2]! * open)
           } else if (q.ph === 40) {
             const i = q.s0, a = (i / 24) * Math.PI * 2
-            const r = 1 + 0.16 * Math.sin(age * 5 + i * 2.1) + 0.1 * Math.sin(age * 11 + i) + ((i * 37) % 7) / 40
-            const sc = size * (0.55 + 0.3 * Math.sin(age * 8 + i)) * open
+            const r = 1.02 + 0.09 * Math.sin(age * 5 + i * 2.1) + 0.06 * Math.sin(age * 11 + i) + ((i * 37) % 7) / 70
+            const sc = size * (0.36 + 0.16 * Math.sin(age * 8 + i)) * open
             t.position = Vector3.create(it.at.x + A * r * Math.cos(a), cy + (H / 2) * r * Math.sin(a), it.at.z); t.scale = Vector3.create(sc, sc * 1.7, sc)
           } else if (q.ph >= 50) {
             if (!it.jit || age - (it.jt ?? -1) > 0.1) { it.jt = age; it.jit = Array.from({ length: 24 }, () => (Math.random() - 0.5) * 3) }
