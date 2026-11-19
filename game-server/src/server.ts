@@ -77,7 +77,10 @@ export function startServer(port = PORT, match: Match = makeMatch((process.env.E
   const DEV = process.env.EMANATE_DEV === 'on'
   const ADMIN_TOKEN = process.env.EMANATE_ADMIN_TOKEN ?? ''
   const TRUST_PROXY = process.env.EMANATE_TRUST_PROXY === '1' // behind Caddy: the client address is the last X-Forwarded-For entry
-  const MAX_PLAYERS = Number(process.env.EMANATE_MAX_PLAYERS ?? 64)
+  const LEASE_SECONDS = 20 // c26: the lease a joined wearer's Halo is granted on every valid tick (it lapses by itself)
+const INACTIVE_MS = 300_000 // c26: a joined wearer who has not moved for 5 minutes gets no grant
+const movedAt = new Map<string, { x: number; z: number; at: number }>()
+const MAX_PLAYERS = Number(process.env.EMANATE_MAX_PLAYERS ?? 64)
   const MAX_PIDS_PER_IP = Number(process.env.EMANATE_MAX_PIDS_PER_IP ?? 8) // distinct players one address may hold in the match (a household or an event, not a bot)
   const pidIp = new Map<string, string>() // player id -> the address that registered it (only for players currently in the match)
   if (!DEV && !['127.0.0.1', '::1', 'localhost'].includes(HOST)) throw new Error('refusing to listen on ' + HOST + ' without EMANATE_DEV=on: bind 127.0.0.1 and put Caddy in front')
@@ -169,11 +172,19 @@ export function startServer(port = PORT, match: Match = makeMatch((process.env.E
           if (e.ev === 'choice') m.choose(t.pid, String(e.pick))
           if (e.ev === 'replay') m.replay(e.kind === 'round' ? 'round' : 'again', Number(e.round ?? 1))
         }
-        return reply({ ok: true, state: m.snapshot(p.id), idle: false, ...halo.forTick(t.pid, t.sv) })
+        // c26 (gate B): the lease. The server grants 20 s of powers on every valid tick of a joined wearer (in the match, or inside the lobby bubble); the Halo lets it lapse by itself. A joined wearer who has not moved for INACTIVE_MS gets no grant.
+        const mv = movedAt.get(t.pid)
+        if (!mv || Math.hypot(mv.x - t.pos.x, mv.z - t.pos.z) > 0.5) movedAt.set(t.pid, { x: t.pos.x, z: t.pos.z, at: Date.now() })
+        const b = m.bubble
+        const inBubble = !!b && Math.hypot(b.x - t.pos.x, b.z - t.pos.z) <= b.radius * 1.2
+        const joined = m.players.has(t.pid) || inBubble
+        const inactive = Date.now() - (movedAt.get(t.pid)?.at ?? Date.now()) > INACTIVE_MS
+        return reply({ ok: true, state: m.snapshot(p.id), idle: false, ...(joined && !inactive ? { lease: LEASE_SECONDS } : {}), ...halo.forTick(t.pid, t.sv) })
       }
       if (url === '/halo/state' && req.method === 'GET') {
         const pvq = Number(new URL(req.url ?? '/', 'http://x').searchParams.get('pv'))
-        return reply({ ok: true, ...halo.publicState(Number.isFinite(pvq) ? pvq : undefined) }) // no player data either way
+        const bb = m.bubble // c26: the bare check also says whether a lobby exists and where its bubble is (no player data): a not-yet-joined Halo compares its own position to it locally
+        return reply({ ok: true, ...halo.publicState(Number.isFinite(pvq) ? pvq : undefined), lobby: !!bb, bubble: bb ? { x: bb.x, y: bb.y, z: bb.z, radius: bb.radius } : null }) // no player data either way
       }
       // Admin and debug routes: only when a separate admin token is set (or the local DEV mode on loopback); a wrong token counts against the address.
       if (ADMIN_ROUTES.has(url)) {

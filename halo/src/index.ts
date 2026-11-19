@@ -39,7 +39,7 @@ import {
 } from '@dcl/sdk/ecs'
 import { Vector3, Color4 } from '@dcl/sdk/math'
 import { emit } from './net'
-import { gameInit, gameUpdate, gameTier, gamePlaceTrap, gameHud, gameCameraTest, hudOverlay } from './game'
+import { gameInit, gameUpdate, gameTier, gamePlaceTrap, gameHud, gameCameraTest, hudOverlay, powersAllowed } from './game'
 import { idle } from './net'
 import ReactEcs, { UiEntity, Label, ReactEcsRenderer } from '@dcl/sdk/react-ecs'
 import { dialogUi } from './dialog'
@@ -161,7 +161,7 @@ function liftFactor(y: number): number {
 
 function halo(dt: number) {
   elapsed += dt
-  if (idle || !feature('powers')) {
+  if (idle || !feature('powers') || !powersAllowed()) { // c26: no consent / no lease / opt-out: the stock avatar
     // idle (the server's kill switch) or the powers switched off: the client's own locomotion, no forces
     if (tier !== 0) setTier(0)
     AvatarLocomotionSettings.deleteFrom(engine.PlayerEntity)

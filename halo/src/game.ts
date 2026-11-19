@@ -8,9 +8,10 @@ import { skyUpdate, skyText, skyStart } from './sky'
 import { openDialog, closeDialog, setDialogClock, dialog } from './dialog'
 import { planParticles } from './particleplan'
 import { ParticleFx, FxLib, playLib, FX_KINDS, Arrows, Plumes, ChargeArcs, DropMarkers, TrapMarkers, BubbleFx, RiftFx as BurstRiftFx, TestMarkers, EndgameFx, SkyDome, StandIn, RiftFx, AuroraFx, DistanceMarkers, CameraTests, MARKER_COLOR_NAMES, MARKER_DISTANCES, initSounds, playSlot, playSound, soundsUpdate, setRemoteAudio, audioStats, slotSource } from './fx'
+import { consent, optOut, leaseValid, bare, grantConsent, doOptOut } from './net'
 import { idle, setIdle, refetchSettings, cmdQueue, settingsInfo, refusedNote, emit, netUpdate, sendGameEvent, serverState, serverUp, lastErr, netStatus, lastGameError, manifestUpdate, manifestInfo } from './net'
 import { replayMenuAction, cueKeyFor } from './uiplan'
-import { FXS, TICK, applyRemote, feature, say, PROTOCOL_VERSION } from './settings'
+import { FXS, TICK, applyRemote, feature, say, PROTOCOL_VERSION, FINAL_NO_TEST_POWERS } from './settings'
 import {
   ArrowChannel, PlumeBudget, Warnings, pressRed, pressPink, RULES, TEST_TARGETS, testMovingSynth, testDeadZoneDistance, dist, nearest, type Vec, type Target
 } from './logic'
@@ -163,7 +164,7 @@ export function gameTier(base: 0 | 1 | 2 | 3): 0 | 1 | 2 | 3 {
 // E: place a Discharge Trap where the player stands (one at a time). The server keeps the trap, every halo draws it; it goes off when the Synth or any
 // player (the placer and teammates too) comes within 5 m: everyone in range drops one power level for 10 s.
 export function gamePlaceTrap() {
-  if (!feature('trap')) return
+  if (!feature('trap') || !powersAllowed()) return
   const world = toWorld(curMe)
   if (mode === 'server') {
     if (serverState?.you?.hasTrap) {
@@ -211,11 +212,43 @@ ${skyText}
 ${round}   keys: 1 red ${cd('red')}  2 pink ${cd('pink')}  3 dead-zone ${warnings.deadZoneEnabled ? 'ON' : 'off'} ${cd('white')}  4 plumes ${left}   E trap ${hasTrap ? 'DOWN' : 'ready'}   boost ${boostLeft > 0 ? boostLeft.toFixed(0) + 's' : '-'}${trapLeft > 0 ? '   TRAPPED ' + trapLeft.toFixed(0) + 's' : ''}   ${lastEventNote}`
 }
 
+
+// ---- c26 (gate B): the wearer's own consent, the lease, the opt-out ----
+// Join: inside the lobby bubble, HOLD E for 1.5 s. Leave: HOLD Ctrl + Shift + E for 1 s, any time. Both are read here from the wearer's own keys; no server value, setting or command can set or clear them.
+let joinHold = 0
+let optHold = 0
+let wasInside = false
+/** may powers and forces run right now? The opt-out always wins; a joined wearer needs a live lease; a wearer who never joined only gets the dev test mode (server unreachable), and only while FINAL_NO_TEST_POWERS is off. */
+export function powersAllowed(): boolean {
+  if (optOut) return false
+  if (consent) return leaseValid()
+  return !FINAL_NO_TEST_POWERS && !serverUp()
+}
+/** consent + a live lease: what push, lift and teleport need (and a running match, checked by the caller) */
+const joinedAndLeased = () => consent && !optOut && leaseValid()
+const matchState = (): string => (mode === 'server' ? String(serverState?.match?.state ?? '') : '')
+function gateUpdate(dt: number, world: Vec) {
+  const ctrl = inputSystem.isPressed(InputAction.IA_WALK)
+  const shift = inputSystem.isPressed(InputAction.IA_MODIFIER)
+  const e = inputSystem.isPressed(InputAction.IA_PRIMARY)
+  if (!optOut) {
+    if (ctrl && shift && e) { optHold += dt; if (optHold >= 1) { doOptOut(); note('Emanate is off. Take the halo off and put it on again to start again.') } } else optHold = 0
+  }
+  if (optOut || consent) { joinHold = 0; return }
+  const b = bare.bubble
+  const inside = !!b && Math.hypot(world.x - b.x, world.z - b.z) <= b.radius
+  if (inside && !wasInside) note('Hold E for 1.5 seconds to join the game.')
+  wasInside = inside
+  if (inside && e && !ctrl && !shift) { joinHold += dt; if (joinHold >= 1.5) { grantConsent(); joinHold = 0; note('You joined. Hold Ctrl + Shift + E for 1 second to leave.') } } else joinHold = 0
+}
+
 // ---- the per-frame update; me = the wearer's scene-local position ----
 export function gameUpdate(dt: number, me: Vec, speed: number, airborne: boolean, tier: number, vy: number) {
   if (!started) return
   clock += dt
-  if (idle) {
+  gateUpdate(dt, toWorld(me))
+  const gated = idle || optOut || (!consent && (FINAL_NO_TEST_POWERS || serverUp())) // c26: before consent the Halo only does the bare check (the dev test mode, server unreachable and flag off, is the one exception)
+  if (gated) {
     // the server's kill switch (or a refusal): nothing is drawn, nothing is forced, nothing is sent about the player
     if (!wasIdle) { wasIdle = true; hideAll(); emit('idle', { on: true }) }
     netUpdate(dt, { pid: myId, name: myName, pos: toWorld(me), local: me, speed, tier }) // only the bare wake-up poll runs while idle
@@ -223,8 +256,9 @@ export function gameUpdate(dt: number, me: Vec, speed: number, airborne: boolean
   }
   if (wasIdle) { wasIdle = false; emit('idle', { on: false }) }
   while (cmdQueue.length) { try { runCommand(cmdQueue.shift()!) } catch (e) { emit('error', { where: 'command', msg: String(e) }) } }
-  if (pushUntil > clock) Physics.applyForceToPlayer(PUSH_SOURCE, Vector3.create(pushForce.x, pushForce.y, pushForce.z))
+  if (pushUntil > clock && joinedAndLeased()) Physics.applyForceToPlayer(PUSH_SOURCE, Vector3.create(pushForce.x, pushForce.y, pushForce.z))
   else if (pushUntil !== 0) { pushUntil = 0; Physics.removeForceFromPlayer(PUSH_SOURCE) }
+  if (lg && lg.phase !== 'done' && !joinedAndLeased()) { Physics.removeForceFromPlayer(LIFT_SOURCE); lg = null } // c26: no consent or no lease: no lift
   const wasServer = mode === 'server'
   mode = serverUp() ? 'server' : 'test'
   if ((mode === 'server') !== wasServer) emit('mode', { mode, err: lastErr })
@@ -633,6 +667,10 @@ const teleportPending: { id: string; t0: number; from: Vec; asked: Vec; result: 
 function serverTeleport(ev: any) {
   const asked = { x: Number(ev.x), y: Number(ev.y), z: Number(ev.z) }
   if (![asked.x, asked.y, asked.z].every((v) => Number.isFinite(v))) return
+  // c26: joined + leased; in a running match at most 300 m from the wearer; in the lobby (the group start) or at the ending any distance
+  const ms = matchState()
+  if (!joinedAndLeased() || !(ms === 'playing' || ms === 'lobby' || ms === 'ended')) return
+  { const f0 = toWorld(curMe); if (ms === 'playing' && Math.hypot(asked.x - f0.x, asked.z - f0.z) > 300) return }
   const id = String(ev.id ?? '').slice(0, 24)
   const from = toWorld(curMe)
   note(`teleport ${id}: ${Math.round(Math.hypot(asked.x - from.x, asked.z - from.z))} m`)
@@ -973,13 +1011,14 @@ function runCommand(c: Record<string, unknown>) {
       fxLib.spawn(c.kind, at, clock, { size: num(c.size, 3), seconds: num(c.seconds, 3), color: c.color, n: num(c.n, 12), height: num(c.height, 20), heading: num(c.heading, 0) })
       break
     }
-    case 'push': { // { x,y,z, seconds }: a force on the wearer for a while (limited)
-      const f = { x: Math.max(-40, Math.min(40, num(c.x, 0))), y: Math.max(-40, Math.min(60, num(c.y, 0))), z: Math.max(-40, Math.min(40, num(c.z, 0))) }
+    case 'push': { // { x,y,z, seconds }: a force on the wearer for a while (c26: only joined + leased + a running match; push 15 horizontal, 25 vertical, 3 s)
+      if (!joinedAndLeased() || matchState() !== 'playing') break
+      const f = { x: Math.max(-15, Math.min(15, num(c.x, 0))), y: Math.max(-15, Math.min(25, num(c.y, 0))), z: Math.max(-15, Math.min(15, num(c.z, 0))) }
       pushForce = f
-      pushUntil = clock + Math.max(0.1, Math.min(10, num(c.seconds, 1)))
+      pushUntil = clock + Math.max(0.1, Math.min(3, num(c.seconds, 1)))
       break
     }
-    case 'lift': startLiftGlide(toWorld(curMe), num(c.altitude, 100)); break // the lift-and-glide start: the halo lifts, releases, and prompts for the glider
+    case 'lift': if (joinedAndLeased() && matchState() === 'playing') startLiftGlide(toWorld(curMe), Math.max(20, Math.min(120, num(c.altitude, 100)))); break // c26: joined + leased + a running match; 20..120 m // the lift-and-glide start: the halo lifts, releases, and prompts for the glider
     case 'teleport': serverTeleport(c); break
     case 'tick': applyRemote({ tick: { everySec: num(c.every, TICK.everySec) } }); break
     case 'feature': if (typeof c.name === 'string') applyRemote({ features: { [c.name]: c.on === false || c.on === 0 ? 0 : 1 } }); break

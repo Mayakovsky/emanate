@@ -50,6 +50,8 @@ export const TEXT: Record<string, string> = {
 // ---- which sound an event plays: event slot id -> another slot id, or "lib:<name>" for a tone of the library inside the zip; "" = silent ----
 export const SOUNDS: Record<string, string> = {}
 // ---- the channel ----
+// c26: ONE build flag. OFF while the Halo is still tested (the server-unreachable test mode keeps its Tier 1 and the test keys); it MUST be ON in the published build (blocking step on the final-build readiness list).
+export const FINAL_NO_TEST_POWERS = false
 export const TICK = { everySec: 0.25, idlePollSec: 60 }
 
 const SECTIONS: Record<string, Record<string, any>> = { power: POWER, rules: RULES, fx: FXS, features: FEATURES, text: TEXT, sounds: SOUNDS, tick: TICK }

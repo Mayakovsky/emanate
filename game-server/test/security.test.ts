@@ -259,3 +259,24 @@ test('trace events from the halo are kept (name cleaned, text capped) and nothin
   const old = cleanTick({ pid: '0xabc123', pos: { x: 0, y: 0, z: 0 }, events: [{ ev: 'probe', what: 'teleport', text: 'r' }] })!
   assert.equal(old.events.length, 1); assert.equal((old.events[0] as any).ev, 'trace'); assert.equal((old.events[0] as any).what, 'teleport')
 })
+
+test('c26 gate B: the bare check carries only the lobby and the bubble (no player data); a tick grants a 20 s lease only to a joined wearer', async () => {
+  await withServer({}, async (port, m: any) => {
+    m.cfg = { ...m.cfg, lobbyEnabled: true } // the real server has the lobby on: a wearer not yet in the bubble only waits
+    const bare = await (await fetch(url(port, '/halo/state?pv=1'))).json() as any
+    assert.equal(bare.lobby, false); assert.equal(bare.bubble, null)
+    assert.deepEqual(Object.keys(bare).filter((k) => !['ok', 'idle', 'sv', 'lobby', 'bubble', 'refuse', 'message'].includes(k)), [])
+    // no lobby and not in a match: a tick is answered but carries no lease
+    const r1 = await (await tick(port, T('0x' + 'a'.repeat(40)))).json() as any
+    assert.equal(r1.lease, undefined)
+    // a lobby around the wearer: the wearer is inside the bubble, so the bare check shows it and the tick grants the lease
+    m.bubble = { x: 5, y: 0, z: 5, radius: 10 }
+    const bare2 = await (await fetch(url(port, '/halo/state?pv=1'))).json() as any
+    assert.equal(bare2.lobby, true); assert.deepEqual(bare2.bubble, { x: 5, y: 0, z: 5, radius: 10 })
+    const r2 = await (await tick(port, T('0x' + 'b'.repeat(40)))).json() as any
+    assert.equal(r2.lease, 20)
+    // a wearer far outside the bubble and not in the match gets none
+    const far = { ...T('0x' + 'c'.repeat(40)), pos: { x: 500, y: 0, z: 500 } }
+    assert.equal(((await (await tick(port, far)).json()) as any).lease, undefined)
+  })
+})
