@@ -1046,7 +1046,7 @@ export class ParticleFx {
       initialColor: { start: c4(em.colorMin), end: c4(em.colorMax) }, colorOverTime: { start: c4(em.fadeStart), end: c4(em.fadeEnd) },
       initialVelocitySpeed: { start: em.speedMin, end: em.speedMax }, blendMode: em.blend === 'add' ? 1 : 0, billboard: true, shape, simulationSpace: 1
     }
-    if (em.textured) out.texture = { tex: { $case: 'texture', texture: { src: 'images/puff.png' } } } // inside the zip: the only place a wearable's texture can come from
+    if (em.textured) out.texture = { src: 'images/puff.png' } // a particle's texture is a plain { src } (NOT the material's union: that shape made the scene's CRDT serializer throw and the scene stalled, found 18 Nov); inside the zip: the only place a wearable's texture can come from
     return out
   }
   private remove(it: PartItem) {
