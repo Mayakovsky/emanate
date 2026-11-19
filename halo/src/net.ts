@@ -1,6 +1,6 @@
-// Telemetry + game sync with the local Emanate game server (127.0.0.1:8787). Build 04.
+// Telemetry + game sync with the Emanate game server (the address is in server-url.ts). Build 04.
 // The halo's console.log never reaches Player.log, so every event goes to the server. Plain `fetch` over http to
-// 127.0.0.1 works from a wearable (needs USE_FETCH in requiredPermissions). signedFetch is NOT available here.
+// A wearable may fetch https addresses only (needs USE_FETCH in requiredPermissions). signedFetch is NOT available here.
 import { Vec } from './logic'
 
 import { SERVER_URL } from './server-url'

@@ -37,7 +37,7 @@ chk('hides nothing / replaces nothing (single-slot budget)', not data.get('hides
 # ---- scene.json ----
 chk('scene.json: isPortableExperience true', sc.get('isPortableExperience') is True, sc.get('isPortableExperience'))
 chk('scene.json: runtimeVersion "7"', sc.get('runtimeVersion') == '7', sc.get('runtimeVersion'))
-# Build 04: USE_FETCH / USE_WEBSOCKET are declared on purpose (halo <-> local game server on 127.0.0.1); nothing else may be.
+# Build 04: USE_FETCH / USE_WEBSOCKET are declared on purpose (halo <-> the game server); nothing else may be.
 chk('scene.json: requiredPermissions only USE_FETCH / USE_WEBSOCKET (Build 04 local-server telemetry)', set(sc.get('requiredPermissions', [])) <= {'USE_FETCH', 'USE_WEBSOCKET'}, sc.get('requiredPermissions'))
 
 # ---- sizes ----
