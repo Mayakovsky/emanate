@@ -164,7 +164,7 @@ export function startServer(port = PORT, match: Match = makeMatch((process.env.E
         const p = m.upsertPlayer(t.pid, { name: t.name, side: CONFIG.choiceDialogue ? undefined : t.side, pos: t.pos, speed: t.speed })
         for (const e of t.events) {
           if (e.ev === 'plume') m.plume(t.pid, t.pos)
-          if (e.ev === 'probe') { try { fs.appendFileSync(path.join(LOGDIR, 'halo-probes.jsonl'), JSON.stringify({ t: new Date().toISOString(), pid: t.pid.slice(0, 10), what: e.what, text: e.text }) + String.fromCharCode(10)) } catch {} }
+          if (e.ev === 'trace') { try { fs.appendFileSync(path.join(LOGDIR, 'halo-probes.jsonl'), JSON.stringify({ t: new Date().toISOString(), pid: t.pid.slice(0, 10), what: e.what, text: e.text }) + String.fromCharCode(10)) } catch {} }
           if (e.ev === 'trap') m.placeTrap(t.pid, t.pos) // E: the Discharge Trap, placed where the player stands
           if (e.ev === 'choice') m.choose(t.pid, String(e.pick))
           if (e.ev === 'replay') m.replay(e.kind === 'round' ? 'round' : 'again', Number(e.round ?? 1))

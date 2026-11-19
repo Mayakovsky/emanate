@@ -4,7 +4,7 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { SLOTS, fileFor } from './audioManifest.ts'
 
-const TYPES: Record<string, string> = { '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.mp3': 'audio/mpeg', '.png': 'image/png', '.glb': 'model/gltf-binary' } // round 24 probe: a png and a glb are served for the runtime-loading test
+const TYPES: Record<string, string> = { '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.mp3': 'audio/mpeg' }
 
 // a slot is recorded as <id with dots as underscores>.wav (or .ogg / .mp3, in that order of preference)
 export function resolveFile(dir: string, id: string): string | null {

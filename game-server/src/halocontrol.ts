@@ -6,7 +6,7 @@
 //   policy    refuse (or serve older behaviour to) a halo whose protocol version is below minPv
 export const SERVER_PROTOCOL = 1
 const SECTIONS = new Set(['power', 'rules', 'fx', 'features', 'text', 'sounds', 'tick'])
-const COMMANDS = new Set(['hud', 'sound', 'fx', 'push', 'lift', 'teleport', 'tick', 'feature', 'idle', 'settings', 'probe', 'particles'])
+const COMMANDS = new Set(['hud', 'sound', 'fx', 'push', 'lift', 'teleport', 'tick', 'feature', 'idle', 'settings', 'particles'])
 const MAX_QUEUE = 40
 
 export interface HaloPolicy { minPv: number; message: string }

@@ -249,8 +249,8 @@ test('one address cannot fill the match with invented players (per-address playe
   })
 })
 
-test('probe events from the test build are kept (name cleaned, text capped) and nothing else is let through', () => {
-  const ok = cleanTick({ pid: '0xabc123', pos: { x: 0, y: 0, z: 0 }, events: [{ ev: 'probe', what: 'lift glide!', text: 'x'.repeat(900), extra: 1 }, { ev: 'probe', what: 5, text: 'no' }] })!
+test('trace events from the halo are kept (name cleaned, text capped) and nothing else is let through', () => {
+  const ok = cleanTick({ pid: '0xabc123', pos: { x: 0, y: 0, z: 0 }, events: [{ ev: 'trace', what: 'lift glide!', text: 'x'.repeat(900), extra: 1 }, { ev: 'trace', what: 5, text: 'no' }] })!
   assert.equal(ok.events.length, 1)
   assert.equal((ok.events[0] as any).what, 'liftglide')
   assert.equal(((ok.events[0] as any).text as string).length, 400)
