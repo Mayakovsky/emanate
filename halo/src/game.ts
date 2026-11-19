@@ -689,7 +689,9 @@ function serverTeleport(ev: any) {
     const t0 = clock
     const tp = { id, t0, from, asked, result: 'calling', checkAt: 1e9 }
     teleportPending.push(tp)
-    Promise.resolve(ra.movePlayerTo({ newRelativePosition: Vector3.create(local.x, local.y, local.z) })).then(
+    // c24g: an optional `look` { x, y, z } (world) turns the camera toward that point after the move (movePlayerTo's cameraTarget); ignored unless all three are finite numbers
+    const lk = ev.look && typeof ev.look === 'object' && [ev.look.x, ev.look.y, ev.look.z].every((v: unknown) => typeof v === 'number' && Number.isFinite(v)) ? toLocal({ x: ev.look.x, y: ev.look.y, z: ev.look.z }) : null
+    Promise.resolve(ra.movePlayerTo(lk ? { newRelativePosition: Vector3.create(local.x, local.y, local.z), cameraTarget: Vector3.create(lk.x, lk.y, lk.z) } : { newRelativePosition: Vector3.create(local.x, local.y, local.z) })).then(
       (r: unknown) => { tp.result = 'returned ' + JSON.stringify(r).slice(0, 60); tp.checkAt = clock + 1.5; tp.t0 = clock - tp.t0 },
       (e: unknown) => { probeReport('teleport', { id, result: 'rejected', error: String(e).slice(0, 160), from, asked }); const k = teleportPending.indexOf(tp); if (k >= 0) teleportPending.splice(k, 1) }
     )
