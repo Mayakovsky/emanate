@@ -255,4 +255,7 @@ test('trace events from the halo are kept (name cleaned, text capped) and nothin
   assert.equal((ok.events[0] as any).what, 'liftglide')
   assert.equal(((ok.events[0] as any).text as string).length, 400)
   assert.equal(Object.keys(ok.events[0]!).sort().join(), 'ev,text,what')
+  // an older halo (c24i and before) still sends ev 'probe': accepted and stored as a trace
+  const old = cleanTick({ pid: '0xabc123', pos: { x: 0, y: 0, z: 0 }, events: [{ ev: 'probe', what: 'teleport', text: 'r' }] })!
+  assert.equal(old.events.length, 1); assert.equal((old.events[0] as any).ev, 'trace'); assert.equal((old.events[0] as any).what, 'teleport')
 })

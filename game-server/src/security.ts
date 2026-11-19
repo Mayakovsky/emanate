@@ -124,7 +124,7 @@ export function cleanTick(j: any): CleanTick | null {
     for (const e of j.events.slice(0, 50)) {
       if (!e || typeof e !== 'object') continue
       if (e.ev === 'plume' || e.ev === 'trap') events.push({ ev: e.ev }) // a plume is placed where the player stands: the position in the event is ignored
-      else if (e.ev === 'trace' && typeof e.what === 'string' && typeof e.text === 'string') events.push({ ev: 'trace', what: e.what.replace(/[^a-zA-Z0-9_.-]/g, '').slice(0, 40), text: e.text.slice(0, 400) }) // the test build's probe results (round 12): kept in the server's probe log
+      else if ((e.ev === 'trace' || e.ev === 'probe') && typeof e.what === 'string' && typeof e.text === 'string') events.push({ ev: 'trace', what: e.what.replace(/[^a-zA-Z0-9_.-]/g, '').slice(0, 40), text: e.text.slice(0, 400) }) // the test build's probe results (round 12): kept in the server's probe log
       else if (e.ev === 'choice' && typeof e.pick === 'string' && CHOICES.has(e.pick)) events.push({ ev: 'choice', pick: e.pick })
       else if (e.ev === 'replay') {
         const kind = e.kind === 'round' ? 'round' : 'again'

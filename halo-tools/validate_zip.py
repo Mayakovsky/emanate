@@ -51,6 +51,11 @@ imgs = [n for n in names if n.lower().endswith(('.png', '.jpg')) and n != 'thumb
 imgs_ok = all(n.startswith('images/') and n.lower().endswith('.png') and z.getinfo(n).file_size < 4096 for n in imgs) and len(imgs) <= 8
 chk('no stray logs / loose images in the zip (images/*.png under 4 KB, at most 8, are the particle textures)', not any(n.endswith('.log') for n in names) and imgs_ok, sorted(names))
 
+# c25: every particle texture the halo can name must be in the zip (the zip is locked after the Mint Lock, so a missing file could never be added)
+TEXTURES = ['puff', 'wisp', 'flame', 'spark', 'ring', 'flipbook']  # keep in step with PARTICLE_TEXTURES in halo src/particleplan.ts
+missing = [t for t in TEXTURES if 'images/' + t + '.png' not in names]
+chk('all six named particle textures are present (images/<name>.png)', not missing, 'missing: ' + ', '.join(missing) if missing else 'all present')
+
 # ---- the model ----
 g = z.read(mains[0])
 off = 12; ch = []

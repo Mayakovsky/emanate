@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { planParticles, dropOldest, PCAP, PARTICLE_KINDS } from '../src/particleplan.ts'
+import { planParticles, dropOldest, PCAP, PARTICLE_KINDS, PARTICLE_TEXTURES } from '../src/particleplan.ts'
+import { existsSync, statSync } from 'node:fs'
 import { chevronY, followY, RAY_UP, RAY_MAX, LIFT } from '../src/groundplan.ts'
 import { applyRemote, resetToDefaults, FXS, FEATURES, feature } from '../src/settings.ts'
 
@@ -88,4 +89,8 @@ test('c24i: every stage has a cue text (plain English, one or two short lines, u
   applyRemote({ text: { cueRound: '' } }); assert.equal(say('cueRound'), ''); resetToDefaults(); assert.ok(say('cueRound').length > 0)
   applyRemote({ features: { cues: 0 } }); assert.equal(feature('cues'), false); resetToDefaults(); assert.equal(feature('cues'), true)
   applyRemote({ fx: { cueSeconds: 999 } }); assert.equal(FXS.cueSeconds, 30); resetToDefaults(); assert.equal(FXS.cueSeconds, 9)
+})
+
+test('c25: every named particle texture has its file in images/ (the zip is locked after the Mint Lock, so a missing one could never be added)', () => {
+  for (const t of PARTICLE_TEXTURES) { const f = new URL('../images/' + t + '.png', import.meta.url); assert.ok(existsSync(f), 'missing images/' + t + '.png'); assert.ok(statSync(f).size > 0 && statSync(f).size < 4096, t) }
 })
