@@ -105,24 +105,6 @@ export function netUpdate(dt: number, info: TickInfo) {
     })
 }
 
-export function probeWebSocket() {} // removed: the halo is fetch-only (it polls /tick); kept as a no-op for callers
-
-// Equipped-wearable diagnostics: which local transports a portable experience may use, shown on the HUD.
-export let probeText = 'probe: pending'
-const probeRes: Record<string, string> = {}
-const showProbe = () => (probeText = 'probe: ' + Object.entries(probeRes).map(([k, v]) => k + '=' + v).join(' '))
-export function probeAll() {
-  const targets: [string, string][] = [['srv', SERVER + '/audio/manifest.json']] // one public GET to the configured server
-  for (const [k, url] of targets) {
-    probeRes[k] = '...'
-    fetch(url).then(
-      (r) => { probeRes[k] = 'ok' + r.status; showProbe() },
-      (e) => { probeRes[k] = 'ERR:' + String(e).slice(0, 40); showProbe() }
-    )
-  }
-  showProbe()
-}
-
 export function netStatus() {
   return { up: serverUp(), lastErr, failCount }
 }

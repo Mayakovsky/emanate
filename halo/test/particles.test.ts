@@ -42,7 +42,7 @@ test('the live-emitter cap drops the oldest effects first', () => {
 })
 test('the kill switch and the texture flag come from the server and default to: particles ON, texture OFF', () => {
   resetToDefaults()
-  assert.equal(feature('particles'), true); assert.equal(FXS.particleTexture, 0); assert.equal(FXS.arrowGround, 0)
+  assert.equal(feature('particles'), true); assert.equal(FXS.particleTexture, 1); assert.equal(FXS.arrowGround, 0)
   applyRemote({ features: { particles: 0 }, fx: { particleTexture: 1, arrowGround: 1 } })
   assert.equal(feature('particles'), false); assert.equal(FXS.particleTexture, 1); assert.equal(FXS.arrowGround, 1)
   applyRemote({ fx: { particleTexture: 7, arrowGround: -2 } }); assert.equal(FXS.particleTexture, 1); assert.equal(FXS.arrowGround, 0) // clamped to [0, 1]

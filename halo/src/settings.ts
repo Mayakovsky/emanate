@@ -24,7 +24,7 @@ export const FXS = {
   plumeRed: 1, plumeOrange: 1, plumeSmoke: 0.35, // relative number of red, orange and smoke puffs
   riftSeconds: 3, riftRadius: 14, // the Rift opening effect at the lobby end
   liftAltitudes: 4, // how many lift targets (informational)
-  particleTexture: 0, arrowGround: 0, cueSeconds: 9, // c24f candidate: particles use images/puff.png when 1 (default 0: squares); chevrons follow the ground by raycast when 1 (default 0: flat)
+  particleTexture: 1, arrowGround: 0, cueSeconds: 9, // c24f candidate: particles use images/puff.png when 1 (default 1: textured); chevrons follow the ground by raycast when 1 (default 0: flat)
   gliderPrompt: 1, gliderPromptSeconds: 4 // show the "hold JUMP to open the glider" line for this long after a tier-3 wearer leaves the ground
 }
 // ---- features: 1 on, 0 off ----

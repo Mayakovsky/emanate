@@ -8,9 +8,8 @@ import { skyUpdate, skyText, skyStart } from './sky'
 import { openDialog, closeDialog, setDialogClock, dialog } from './dialog'
 import { planParticles } from './particleplan'
 import { ParticleFx, FxLib, playLib, FX_KINDS, Arrows, Plumes, ChargeArcs, DropMarkers, TrapMarkers, BubbleFx, RiftFx as BurstRiftFx, TestMarkers, EndgameFx, SkyDome, StandIn, RiftFx, AuroraFx, DistanceMarkers, CameraTests, MARKER_COLOR_NAMES, MARKER_DISTANCES, initSounds, playSlot, playSound, soundsUpdate, setRemoteAudio, audioStats, slotSource } from './fx'
-import { idle, setIdle, refetchSettings, cmdQueue, settingsInfo, refusedNote, emit, netUpdate, sendGameEvent, serverState, serverUp, probeWebSocket, probeAll, probeText, lastErr, netStatus, lastGameError, manifestUpdate, manifestInfo } from './net'
+import { idle, setIdle, refetchSettings, cmdQueue, settingsInfo, refusedNote, emit, netUpdate, sendGameEvent, serverState, serverUp, lastErr, netStatus, lastGameError, manifestUpdate, manifestInfo } from './net'
 import { replayMenuAction, cueKeyFor } from './uiplan'
-import { probeTick, probeRun, PROBE } from './probe'
 import { FXS, TICK, applyRemote, feature, say, PROTOCOL_VERSION } from './settings'
 import {
   ArrowChannel, PlumeBudget, Warnings, pressRed, pressPink, RULES, TEST_TARGETS, testMovingSynth, testDeadZoneDistance, dist, nearest, type Vec, type Target
@@ -76,7 +75,6 @@ const trapMarks = new TrapMarkers()
 const bubbleFx = new BubbleFx()
 const burstRift = new BurstRiftFx()
 let burstState: { t0: number; at: Vec; radius: number } | null = null // the bubble blowing (lobby end, or the Ctrl+2 test)
-let testBubble: { at: Vec; radius: number; until: number } | null = null // the Ctrl+2 test dome around the wearer
 let lobbyNote = ''
 let testDropsGone = new Map<string, number>() // test drop id -> time it can come back
 let testRoundStart = 0
@@ -87,8 +85,6 @@ const announcedEnd = new Set<string>()
 
 export function gameInit() {
   initSounds()
-  probeWebSocket()
-  probeAll()
   started = true
   emit('game-init', { build: '04' })
 }
@@ -205,21 +201,18 @@ export function gameHud(now: number): string {
   const hasTrap = mode === 'server' ? !!serverState?.you?.hasTrap : !!testTrap
   const round = mode === 'server' ? `round ${serverState?.match?.round} ${Math.round(serverState?.match?.timeLeft ?? 0)}s` : 'TEST MODE (no server)'
   const ns = netStatus()
-  const extra = (clock < restoredUntil ? restoredNote + '\n' : '') + (lobbyNote ? lobbyNote + '\n' : '') + (probeNote ? probeNote + '\n' : '')
+  const extra = (clock < restoredUntil ? restoredNote + '\n' : '') + (lobbyNote ? lobbyNote + '\n' : '')
   return `${extra}${manifestInfo}; slots ${audioStats.slots}, packed ${audioStats.packed}, last ${audioStats.lastSlot || '-'} (${audioStats.lastSource || '-'})
 frame ${frameMsAvg.toFixed(1)} ms (${(1000 / Math.max(1, frameMsAvg)).toFixed(0)} fps)\nerr: ${lastGameError || 'none'}
 id ${myId.slice(0, 12)}${idReady ? '' : ' (not stable)'}
 pos local (${curMe.x.toFixed(1)}, ${curMe.y.toFixed(1)}, ${curMe.z.toFixed(1)}) world (${(curMe.x + ORIGIN.x).toFixed(1)}, ${(curMe.z + ORIGIN.z).toFixed(1)})
 net ${ns.up ? 'UP' : 'down'} fails=${ns.failCount} ${ns.lastErr}
-${probeText}
-${PROBE}
 ${skyText}
 ${round}   keys: 1 red ${cd('red')}  2 pink ${cd('pink')}  3 dead-zone ${warnings.deadZoneEnabled ? 'ON' : 'off'} ${cd('white')}  4 plumes ${left}   E trap ${hasTrap ? 'DOWN' : 'ready'}   boost ${boostLeft > 0 ? boostLeft.toFixed(0) + 's' : '-'}${trapLeft > 0 ? '   TRAPPED ' + trapLeft.toFixed(0) + 's' : ''}   ${lastEventNote}`
 }
 
 // ---- the per-frame update; me = the wearer's scene-local position ----
 export function gameUpdate(dt: number, me: Vec, speed: number, airborne: boolean, tier: number, vy: number) {
-  probeTick(dt, me)
   if (!started) return
   clock += dt
   if (idle) {
@@ -284,12 +277,11 @@ export function gameUpdate(dt: number, me: Vec, speed: number, airborne: boolean
 
   // ---- keys ----
   const pressed = (a: InputAction) => inputSystem.isTriggered(a, PointerEventType.PET_DOWN)
-  const ctrl = inputSystem.isPressed(InputAction.IA_WALK) // Ctrl (Walk) + 1..3: the round-12 probes (lift and glide, bubble burst, movePlayerTo)
+  const ctrl = inputSystem.isPressed(InputAction.IA_WALK) // Ctrl (Walk): held, so no plain key fires
   const shiftOnly = inputSystem.isPressed(InputAction.IA_MODIFIER) && !ctrl // Shift (the client's Sprint/modifier key) + 1..4: the round-8 test triggers
   const shift = shiftOnly || ctrl
   const pressedKey = (a: InputAction) => !shift && pressed(a)
   if (shiftOnly) shiftKeys(pressed)
-  if (ctrl) ctrlKeys(pressed, me, world)
   if (pressedKey(InputAction.IA_ACTION_3) && !inputSystem.isPressed(InputAction.IA_SECONDARY)) keyRed(world)
   if (pressedKey(InputAction.IA_ACTION_3) && inputSystem.isPressed(InputAction.IA_SECONDARY) && mode === 'test') {
     // F held + 1: the distance render test (see the report): columns at 10, 20, 35, 60, 120, 300, 600 m in four directions
@@ -563,9 +555,6 @@ function syncBubble(dt: number, me: Vec, world: Vec) {
     bubbleFx.show(clock, at, b.radius, !!b.you)
     lobbyNote = `LOBBY: ${b.inside} inside, ${Math.ceil(b.leftMs / 1000)} s left${b.you ? ' (you are in)' : ' (step into the bubble)'}`
     shown = true
-  } else if (testBubble) {
-    if (clock > testBubble.until) { burstState = { t0: clock, at: testBubble.at, radius: testBubble.radius }; testBubble = null; playSlot('cine.rift.strike') }
-    else { bubbleFx.show(clock, testBubble.at, testBubble.radius, true); shown = true }
   }
   if (burstState) {
     const t = clock - burstState.t0
@@ -575,36 +564,30 @@ function syncBubble(dt: number, me: Vec, world: Vec) {
   } else if (!shown) bubbleFx.hide()
 }
 
-// ---- the round-12 probes (Ctrl + 1, 2, 3): each reports to the HUD, to the console log and (with the server up) to the server's probe log ----
-function probeReport(what: string, data: Record<string, unknown>) {
-  emit('probe', { what, ...data })
-  if (mode === 'server') sendGameEvent({ ev: 'probe', what, text: JSON.stringify(data).slice(0, 380) })
-  console.log('[halo] PROBE ' + what + ' ' + JSON.stringify(data))
+// ---- trace reports: each goes to the console log and (with the server up) to the server's log ----
+function traceReport(what: string, data: Record<string, unknown>) {
+  emit('trace', { what, ...data })
+  if (mode === 'server') sendGameEvent({ ev: 'trace', what, text: JSON.stringify(data).slice(0, 380) })
+  console.log('[halo] ' + what + ' ' + JSON.stringify(data))
 }
 const LIFT_SOURCE = engine.addEntity()
 const LIFT_TARGETS = [50, 100, 150, 200]
 let liftIdx = 0
 interface LiftGlide { phase: 'lift' | 'glide' | 'done'; target: number; start: Vec; t0: number; tRelease: number; release: Vec | null; sampleAt: number; sinkSum: number; sinkN: number; hSum: number; wasAir: boolean; maxY: number }
 let lg: LiftGlide | null = null
-let probeNote = ''
-export function probeHud() {
-  return probeNote
-}
 // Ctrl+1: lift to a chosen altitude (50, 100, 150, 200 m; each press picks the next) with a sustained upward force, release it, then the wearer HOLDS JUMP to open the unpowered glider and steers;
-// the probe logs the sink rate, the horizontal speed, the landing spot and the time taken
+// the trace logs the sink rate, the horizontal speed, the landing spot and the time taken
 function startLiftGlide(world: Vec, altitude?: number) {
   if (lg && lg.phase !== 'done') {
     Physics.removeForceFromPlayer(LIFT_SOURCE)
-    probeReport('lift-glide', { aborted: true })
+    traceReport('lift-glide', { aborted: true })
     lg = null
-    probeNote = 'lift-glide: aborted'
     return
   }
   const target = altitude !== undefined ? Math.max(20, Math.min(220, altitude)) : LIFT_TARGETS[liftIdx % LIFT_TARGETS.length]!
   if (altitude === undefined) liftIdx++
   lg = { phase: 'lift', target, start: { ...world }, t0: clock, tRelease: 0, release: null, sampleAt: 0, sinkSum: 0, sinkN: 0, hSum: 0, wasAir: false, maxY: world.y }
-  probeReport('lift-glide', { start: world, target })
-  probeNote = `lift-glide: lifting to ${target} m (press Ctrl+1 again to abort)`
+  traceReport('lift-glide', { start: world, target })
 }
 function liftGlideUpdate(dt: number, me: Vec, world: Vec, vy: number, airborne: boolean) {
   if (!lg || lg.phase === 'done') return
@@ -621,9 +604,8 @@ function liftGlideUpdate(dt: number, me: Vec, world: Vec, vy: number, airborne: 
       s.release = { ...world }
       s.wasAir = true
       promptUntil = clock + 12
-      probeReport('lift-glide', { released: true, y: world.y, liftSeconds: +(clock - s.t0).toFixed(1), x: world.x, z: world.z })
+      traceReport('lift-glide', { released: true, y: world.y, liftSeconds: +(clock - s.t0).toFixed(1), x: world.x, z: world.z })
     }
-    probeNote = `lift-glide: lifting ${world.y.toFixed(0)}/${s.target} m, climb ${vy.toFixed(1)} m/s`
     return
   }
   // glide: the wearer holds jump to open the glider; sample once a second
@@ -633,8 +615,7 @@ function liftGlideUpdate(dt: number, me: Vec, world: Vec, vy: number, airborne: 
     s.sinkSum += sink
     s.sinkN++
     s.hSum += Math.hypot(me.x - (s.release ? toLocal(s.release).x : me.x), me.z - (s.release ? toLocal(s.release).z : me.z))
-    probeReport('lift-glide', { glide: true, t: +(clock - s.tRelease).toFixed(0), y: +world.y.toFixed(1), sink: +sink.toFixed(2), x: +world.x.toFixed(0), z: +world.z.toFixed(0) })
-    probeNote = `lift-glide: HOLD JUMP to glide. t ${(clock - s.tRelease).toFixed(0)} s, y ${world.y.toFixed(0)} m, sink ${sink.toFixed(2)} m/s`
+    traceReport('lift-glide', { glide: true, t: +(clock - s.tRelease).toFixed(0), y: +world.y.toFixed(1), sink: +sink.toFixed(2), x: +world.x.toFixed(0), z: +world.z.toFixed(0) })
   }
   if (!airborne && s.wasAir && clock - s.tRelease > 1.5) {
     const rel = s.release ?? s.start
@@ -643,36 +624,11 @@ function liftGlideUpdate(dt: number, me: Vec, world: Vec, vy: number, airborne: 
     const secs = clock - s.tRelease
     s.phase = 'done'
     const horiz = Math.hypot(dx, dz)
-    probeReport('lift-glide', { landed: true, x: +world.x.toFixed(0), y: +world.y.toFixed(1), z: +world.z.toFixed(0), glideSeconds: +secs.toFixed(0), horizontalFromRelease: +horiz.toFixed(0), meanHorizontalSpeed: +(horiz / Math.max(1, secs)).toFixed(2), meanSink: +(s.sinkSum / Math.max(1, s.sinkN)).toFixed(2), maxAltitude: +s.maxY.toFixed(0) })
-    probeNote = `lift-glide LANDED: ${secs.toFixed(0)} s, ${horiz.toFixed(0)} m from the release point, mean sink ${(s.sinkSum / Math.max(1, s.sinkN)).toFixed(2)} m/s, mean speed ${(horiz / Math.max(1, secs)).toFixed(1)} m/s`
+    traceReport('lift-glide', { landed: true, x: +world.x.toFixed(0), y: +world.y.toFixed(1), z: +world.z.toFixed(0), glideSeconds: +secs.toFixed(0), horizontalFromRelease: +horiz.toFixed(0), meanHorizontalSpeed: +(horiz / Math.max(1, secs)).toFixed(2), meanSink: +(s.sinkSum / Math.max(1, s.sinkN)).toFixed(2), maxAltitude: +s.maxY.toFixed(0) })
   }
   s.wasAir = airborne
 }
-// Ctrl+3: the scene teleport call, once: what happens (refused, a permission prompt, moved)
-function probeMovePlayerTo(world: Vec) {
-  probeNote = 'movePlayerTo probe: calling...'
-  try {
-    // loaded only when the probe runs: a wearable runtime that does not offer the module must not break the halo at start-up
-    const ra = (globalThis as any).require ? (globalThis as any).require('~system/RestrictedActions') : null
-    if (!ra || typeof ra.movePlayerTo !== 'function') {
-      probeReport('movePlayerTo', { result: 'module-or-function-missing', haveRequire: !!(globalThis as any).require })
-      probeNote = 'movePlayerTo probe: the module is not available to this wearable'
-      return
-    }
-    const target = { x: world.x + 20, y: world.y, z: world.z }
-    const t0 = clock
-    const p = ra.movePlayerTo({ newRelativePosition: Vector3.create(me0().x + 20, me0().y, me0().z) })
-    Promise.resolve(p).then(
-      (r: unknown) => { probeReport('movePlayerTo', { result: 'returned', value: JSON.stringify(r), seconds: +(clock - t0).toFixed(1), from: world, asked: target }); probeNote = 'movePlayerTo probe: returned ' + JSON.stringify(r) },
-      (e: unknown) => { probeReport('movePlayerTo', { result: 'rejected', error: String(e).slice(0, 200) }); probeNote = 'movePlayerTo probe: rejected ' + String(e).slice(0, 80) }
-    )
-  } catch (e) {
-    probeReport('movePlayerTo', { result: 'threw', error: String(e).slice(0, 200) })
-    probeNote = 'movePlayerTo probe: threw ' + String(e).slice(0, 80)
-  }
-}
-const me0 = () => curMe
-// the server asks for a teleport (the group start, or the admin's limit probe): one movePlayerTo call, the result and where the avatar ends up are reported to the server's probe log
+// the server asks for a teleport (the group start, or an admin test): one movePlayerTo call, the result and where the avatar ends up are reported to the server's trace log
 const teleportPending: { id: string; t0: number; from: Vec; asked: Vec; result: string; checkAt: number }[] = [] // one entry per call: every call is reported
 function serverTeleport(ev: any) {
   const asked = { x: Number(ev.x), y: Number(ev.y), z: Number(ev.z) }
@@ -683,7 +639,7 @@ function serverTeleport(ev: any) {
   try {
     const ra = (globalThis as any).require ? (globalThis as any).require('~system/RestrictedActions') : null
     if (!ra || typeof ra.movePlayerTo !== 'function') {
-      probeReport('teleport', { id, result: 'module-or-function-missing' })
+      traceReport('teleport', { id, result: 'module-or-function-missing' })
       return
     }
     const local = toLocal(asked)
@@ -694,10 +650,10 @@ function serverTeleport(ev: any) {
     const lk = ev.look && typeof ev.look === 'object' && [ev.look.x, ev.look.y, ev.look.z].every((v: unknown) => typeof v === 'number' && Number.isFinite(v)) ? toLocal({ x: ev.look.x, y: ev.look.y, z: ev.look.z }) : null
     Promise.resolve(ra.movePlayerTo(lk ? { newRelativePosition: Vector3.create(local.x, local.y, local.z), cameraTarget: Vector3.create(lk.x, lk.y, lk.z) } : { newRelativePosition: Vector3.create(local.x, local.y, local.z) })).then(
       (r: unknown) => { tp.result = 'returned ' + JSON.stringify(r).slice(0, 60); tp.checkAt = clock + 1.5; tp.t0 = clock - tp.t0 },
-      (e: unknown) => { probeReport('teleport', { id, result: 'rejected', error: String(e).slice(0, 160), from, asked }); const k = teleportPending.indexOf(tp); if (k >= 0) teleportPending.splice(k, 1) }
+      (e: unknown) => { traceReport('teleport', { id, result: 'rejected', error: String(e).slice(0, 160), from, asked }); const k = teleportPending.indexOf(tp); if (k >= 0) teleportPending.splice(k, 1) }
     )
   } catch (e) {
-    probeReport('teleport', { id, result: 'threw', error: String(e).slice(0, 160), from, asked })
+    traceReport('teleport', { id, result: 'threw', error: String(e).slice(0, 160), from, asked })
   }
 }
 function teleportCheck() {
@@ -705,19 +661,8 @@ function teleportCheck() {
     if (clock < tp.checkAt) continue
     teleportPending.splice(teleportPending.indexOf(tp), 1)
     const now = toWorld(curMe)
-    probeReport('teleport', { id: tp.id, result: tp.result, seconds: +Number(tp.t0).toFixed(2), from: tp.from, asked: tp.asked, ended: now, error_m: +Math.hypot(now.x - tp.asked.x, now.y - tp.asked.y, now.z - tp.asked.z).toFixed(1), airborne: lastAirborne })
+    traceReport('teleport', { id: tp.id, result: tp.result, seconds: +Number(tp.t0).toFixed(2), from: tp.from, asked: tp.asked, ended: now, error_m: +Math.hypot(now.x - tp.asked.x, now.y - tp.asked.y, now.z - tp.asked.z).toFixed(1), airborne: lastAirborne })
   }
-}
-function ctrlKeys(pressed: (a: InputAction) => boolean, me: Vec, world: Vec) {
-  if (pressed(InputAction.IA_ACTION_3)) startLiftGlide(world)
-  if (pressed(InputAction.IA_ACTION_4)) {
-    // Ctrl + 2: the bubble blows: a 10 m dome around the wearer for 4 s, then the burst with the Rift lightning
-    if (burstState) return
-    testBubble = { at: { ...me }, radius: 10, until: clock + 4 }
-    probeReport('bubble-burst', { at: world, radius: 10, note: 'dome for 4 s, then the burst' })
-    probeNote = 'bubble burst: dome for 4 s, then it blows'
-  }
-  if (pressed(InputAction.IA_ACTION_5)) probeMovePlayerTo(world)
 }
 function syncPlumes(me: Vec) {
   if (!feature('plumes')) { plumes.keepOnly(new Set()); return }
@@ -770,7 +715,7 @@ function handleServerEvent(ev: any) {
     case 'lobby-end': lobbyNote = ''; note(say('lobbyEnd', { mode: ev.mode, count: ev.count })); playSlot('cine.rift.strike'); if (lastBubble) { burstState = { t0: clock, at: lastBubble.at, radius: lastBubble.radius }; riftOpening(lastBubble.at) }; break
     case 'lobby-wait': lobbyNote = 'waiting for the next lobby'; note('the game started without you: you wait for the next lobby'); break
     case 'teleport': serverTeleport(ev); break
-    case 'toss': runCommand({ c: 'lift', altitude: Number(ev.altitude) || 100 }); probeReport('toss-event', { round: ev.round, altitude: ev.altitude }); break
+    case 'toss': runCommand({ c: 'lift', altitude: Number(ev.altitude) || 100 }); traceReport('toss-event', { round: ev.round, altitude: ev.altitude }); break
     case 'trap-hit': playSlot('warn.upgrade'); note(ev.synth ? 'Discharge Trap hit the Synth' : 'Discharge Trap went off'); emit('trap-hit', { x: ev.x, z: ev.z, synth: ev.synth, players: ev.players }); break
     case 'endgame': cue('endgame'); note(`endgame: ${ev.kind}`); break
     case 'double-agent': note('you were recruited as a double agent'); playSlot('role.double_agent'); break
@@ -1013,8 +958,7 @@ function runCommand(c: Record<string, unknown>) {
       particleFx.spawn(plan, at2, clock)
       break
     }
-    case 'probe': probeRun(String(c.name ?? '')); break // round 24: test builds only
-    case 'hud': { // { text, seconds }: a line on the screen
+        case 'hud': { // { text, seconds }: a line on the screen
       const text = typeof c.text === 'string' ? c.text.slice(0, 160) : ''
       hudMsg = text ? { text, until: clock + Math.max(0.5, Math.min(60, num(c.seconds, 5))) } : null
       break
