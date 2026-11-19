@@ -8,7 +8,7 @@ import { skyUpdate, skyText, skyStart } from './sky'
 import { openDialog, closeDialog, setDialogClock, dialog } from './dialog'
 import { planParticles } from './particleplan'
 import { ParticleFx, FxLib, playLib, FX_KINDS, Arrows, Plumes, ChargeArcs, DropMarkers, TrapMarkers, BubbleFx, RiftFx as BurstRiftFx, TestMarkers, EndgameFx, SkyDome, StandIn, RiftFx, AuroraFx, DistanceMarkers, CameraTests, MARKER_COLOR_NAMES, MARKER_DISTANCES, initSounds, playSlot, playSound, soundsUpdate, setRemoteAudio, audioStats, slotSource } from './fx'
-import { consent, optOut, leaseValid, bare, grantConsent, doOptOut } from './net'
+import { consent, optOut, paused, setPaused, leaseValid, bare, grantConsent, doOptOut } from './net'
 import { idle, setIdle, refetchSettings, cmdQueue, settingsInfo, refusedNote, emit, netUpdate, sendGameEvent, serverState, serverUp, lastErr, netStatus, lastGameError, manifestUpdate, manifestInfo } from './net'
 import { replayMenuAction, cueKeyFor } from './uiplan'
 import { FXS, TICK, applyRemote, feature, say, PROTOCOL_VERSION, FINAL_NO_TEST_POWERS } from './settings'
@@ -214,25 +214,25 @@ ${round}   keys: 1 red ${cd('red')}  2 pink ${cd('pink')}  3 dead-zone ${warning
 
 
 // ---- c26 (gate B): the wearer's own consent, the lease, the opt-out ----
-// Join: inside the lobby bubble, HOLD E for 1.5 s. Leave: HOLD Ctrl + Shift + E for 1 s, any time. Both are read here from the wearer's own keys; no server value, setting or command can set or clear them.
+// Join: inside the lobby bubble, HOLD E for 1.5 s. Pause/leave: HOLD Ctrl + Shift + E, any time: paused at once, permanent after 3 s. Both are read here from the wearer's own keys; no server value, setting or command can set or clear them.
 let joinHold = 0
 let optHold = 0
 let wasInside = false
 /** may powers and forces run right now? The opt-out always wins; a joined wearer needs a live lease; a wearer who never joined only gets the dev test mode (server unreachable), and only while FINAL_NO_TEST_POWERS is off. */
 export function powersAllowed(): boolean {
-  if (optOut) return false
+  if (optOut || paused) return false
   if (consent) return leaseValid()
   return !FINAL_NO_TEST_POWERS && !serverUp()
 }
 /** consent + a live lease: what push, lift and teleport need (and a running match, checked by the caller) */
-const joinedAndLeased = () => consent && !optOut && leaseValid()
+const joinedAndLeased = () => consent && !optOut && !paused && leaseValid()
 const matchState = (): string => (mode === 'server' ? String(serverState?.match?.state ?? '') : '')
 function gateUpdate(dt: number, world: Vec) {
   const ctrl = inputSystem.isPressed(InputAction.IA_WALK)
   const shift = inputSystem.isPressed(InputAction.IA_MODIFIER)
   const e = inputSystem.isPressed(InputAction.IA_PRIMARY)
   if (!optOut) {
-    if (ctrl && shift && e) { optHold += dt; if (optHold >= 1) { doOptOut(); note('Emanate is off. Take the halo off and put it on again to start again.') } } else optHold = 0
+    if (ctrl && shift && e) { setPaused(true); optHold += dt; if (optHold >= 3) { doOptOut(); note('Emanate is off. Take the halo off and put it on again to start again.') } } else { optHold = 0; if (paused) setPaused(false) } // c26: held = paused at once; released before 3 s = resumes (if consent and the lease still hold); 3 s = permanent
   }
   if (optOut || consent) { joinHold = 0; return }
   const b = bare.bubble
@@ -247,7 +247,7 @@ export function gameUpdate(dt: number, me: Vec, speed: number, airborne: boolean
   if (!started) return
   clock += dt
   gateUpdate(dt, toWorld(me))
-  const gated = idle || optOut || (!consent && (FINAL_NO_TEST_POWERS || serverUp())) // c26: before consent the Halo only does the bare check (the dev test mode, server unreachable and flag off, is the one exception)
+  const gated = idle || optOut || paused || (!consent && (FINAL_NO_TEST_POWERS || serverUp())) // c26: before consent the Halo only does the bare check (the dev test mode, server unreachable and flag off, is the one exception)
   if (gated) {
     // the server's kill switch (or a refusal): nothing is drawn, nothing is forced, nothing is sent about the player
     if (!wasIdle) { wasIdle = true; hideAll(); emit('idle', { on: true }) }

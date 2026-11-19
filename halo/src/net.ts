@@ -24,6 +24,8 @@ let sv = 0
 // ---- c26 (gate B): consent, lease and opt-out live ONLY here and in the Halo's own key handling; no server value, setting or command can set them ----
 export let consent = false // set by the wearer: inside the bubble, hold E for 1.5 s (game.ts). Until then NOTHING about the player is sent.
 export let optOut = false // set by the wearer: hold Ctrl+Shift+E for 1 s. Wins over everything; nothing is sent; resets only when the Halo is worn again.
+export let paused = false // set while the wearer HOLDS Ctrl+Shift+E (game.ts): forces and sending pause at once; releasing before 3 s resumes; 3 s makes optOut permanent
+export function setPaused(v: boolean) { if (optOut) return; paused = v }
 let leaseUntil = -1 // Halo clock: the server's grant on a valid tick reply (20 s at most) lets powers run until then
 export const LEASE_MAX = 20
 export const leaseValid = () => clock < leaseUntil
@@ -42,13 +44,13 @@ let idleBusy = false
 
 export let lastGameError = ''
 export function emit(ev: string, data: Record<string, unknown> = {}) {
-  if (!consent || optOut) { if (ev === 'error') lastGameError = String(data.where ?? '') + ': ' + String(data.msg ?? '').slice(0, 110); return } // c26: nothing is kept for sending before consent
+  if (!consent || optOut || paused) { if (ev === 'error') lastGameError = String(data.where ?? '') + ': ' + String(data.msg ?? '').slice(0, 110); return } // c26: nothing is kept for sending before consent
   if (ev === 'error') lastGameError = String(data.where ?? '') + ': ' + String(data.msg ?? '').slice(0, 110)
   log.push({ ev, seq: seq++, ...data })
   if (log.length > 300) log = log.slice(-300)
 }
 export function sendGameEvent(e: Record<string, unknown>) {
-  if (!consent || optOut) return
+  if (!consent || optOut || paused) return
   out.push(e)
 }
 export const serverUp = () => clock - lastOk < 3
@@ -75,7 +77,7 @@ function handleReply(j: any) {
 }
 export function netUpdate(dt: number, info: TickInfo) {
   clock += dt
-  if (optOut) return // c26: the wearer's own off switch: nothing is sent, nothing is asked
+  if (optOut || paused) return // c26: the wearer's own off switch (held: paused, 3 s: permanent): nothing is sent, nothing is asked
   if (idle || !consent) {
     // IDLE (the kill switch) or NOT YET JOINED (c26): nothing about the player is sent. A bare GET with no player field asks whether to wake up / where the lobby bubble is.
     idleAcc += dt

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { netUpdate, consent, optOut, leaseValid, grantConsent, doOptOut, bare, emit, sendGameEvent, cmdQueue, LEASE_MAX } from '../src/net.ts'
+import { netUpdate, consent, optOut, paused, setPaused, leaseValid, grantConsent, doOptOut, bare, emit, sendGameEvent, cmdQueue, LEASE_MAX } from '../src/net.ts'
 
 // c26 gate B: consent, lease and opt-out (net.ts), with a fake fetch and a fake clock (netUpdate's dt)
 type Call = { url: string; method: string; body?: string }
@@ -45,12 +45,32 @@ test('a lease in a reply is ignored without consent; after consent it is taken, 
   assert.equal(leaseValid(), true) // a renewed grant restores it
 })
 
+test('the held chord pauses at once (nothing sent, nothing kept), releasing resumes, no server value or command cancels the pause', async () => {
+  // the previous tests left consent given and a lease granted
+  assert.equal(consent, true)
+  reply = { ok: true, idle: false, sv: 0, lease: 20 }
+  await run(1)
+  assert.equal(leaseValid(), true)
+  setPaused(true); assert.equal(paused, true)
+  calls.length = 0
+  emit('key', { key: 'x' }); sendGameEvent({ ev: 'plume' })
+  reply = { ok: true, idle: false, sv: 0, lease: 20, paused: false, cmds: [{ c: 'idle', on: false }, { c: 'feature', name: 'powers', on: 1 }, { c: 'settings' }] }
+  await run(3)
+  assert.equal(calls.length, 0, 'while paused nothing is sent, not even the bare check')
+  assert.equal(paused, true, 'no server value or command cancels the pause')
+  setPaused(false); assert.equal(paused, false) // released before 3 s
+  await run(1)
+  assert.ok(calls.some((c) => c.method === 'POST' && c.url.endsWith('/tick')), 'after release sending resumes (consent still holds)')
+  assert.equal(consent, true)
+})
+
 test('a command or a server value cannot set consent or clear the opt-out', async () => {
   reply = { ok: true, idle: false, sv: 0, consent: true, optOut: false, cmds: [{ c: 'feature', name: 'consent', on: 1 }, { c: 'settings' }, { c: 'idle', on: false }] }
   await run(2)
   cmdQueue.length = 0
   doOptOut()
   assert.equal(optOut, true); assert.equal(consent, false); assert.equal(leaseValid(), false)
+  setPaused(true); assert.equal(paused, false, 'after the permanent opt-out the pause state cannot be set again either')
   grantConsent(); assert.equal(consent, false, 'consent cannot be granted after an opt-out')
   reply = { ok: true, idle: false, sv: 0, lease: 20, optOut: false }
   calls.length = 0
