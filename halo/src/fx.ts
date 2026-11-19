@@ -1030,7 +1030,7 @@ export class ParticleFx {
     const entities: Entity[] = []
     for (const em of plan.emitters) {
       const e = engine.addEntity()
-      Transform.create(e, { position: Vector3.create(at.x + em.dx, at.y + em.dy, at.z + em.dz) })
+      Transform.create(e, { position: Vector3.create(at.x + em.dx, at.y + em.dy, at.z + em.dz), rotation: em.up ? Quaternion.fromEulerDegrees(-90, 0, 0) : Quaternion.Identity() })
       ParticleSystem.create(e, this.component(em))
       entities.push(e)
     }
@@ -1046,7 +1046,9 @@ export class ParticleFx {
       initialColor: { start: c4(em.colorMin), end: c4(em.colorMax) }, colorOverTime: { start: c4(em.fadeStart), end: c4(em.fadeEnd) },
       initialVelocitySpeed: { start: em.speedMin, end: em.speedMax }, blendMode: em.blend === 'add' ? 1 : 0, billboard: true, shape, simulationSpace: 1
     }
-    if (em.textured) out.texture = { src: 'images/puff.png' } // a particle's texture is a plain { src } (NOT the material's union: that shape made the scene's CRDT serializer throw and the scene stalled, found 18 Nov); inside the zip: the only place a wearable's texture can come from
+    if (em.textured) { out.texture = { src: 'images/' + em.tex + '.png' }; if (em.tex === 'flipbook') out.spriteSheet = { tilesX: 4, tilesY: 4, framesPerSecond: 12 } }
+    // (the next line is the old one's comment)
+    // // a particle's texture is a plain { src } (NOT the material's union: that shape made the scene's CRDT serializer throw and the scene stalled, found 18 Nov); inside the zip: the only place a wearable's texture can come from
     return out
   }
   private remove(it: PartItem) {

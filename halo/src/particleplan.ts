@@ -18,6 +18,7 @@ export const PCAP = {
   speed: 40, // m/s
   spread: 60 // cone half-angle, degrees
 }
+export const PARTICLE_TEXTURES = ['puff', 'wisp', 'flame', 'spark', 'ring', 'flipbook'] as const // the files images/<name>.png inside the zip: the only textures a wearable can have
 export type RGBA = [number, number, number, number]
 export interface Emitter {
   dx: number; dy: number; dz: number // offset from the command's position
@@ -28,6 +29,8 @@ export interface Emitter {
   colorMin: RGBA; colorMax: RGBA; fadeStart: RGBA; fadeEnd: RGBA
   blend: 'alpha' | 'add'
   textured: boolean
+  tex: string // one of PARTICLE_TEXTURES (used only when textured)
+  up: boolean // cone and box shapes emit along the entity's forward axis: the entity is turned -90 degrees about X so that axis points UP (found in the real client: a smoke column came out sideways)
 }
 export interface ParticlePlan { kind: ParticleKind; seconds: number; emitters: Emitter[] }
 
@@ -53,43 +56,44 @@ export function planParticles(kind: unknown, p: any, textured: boolean): Particl
   const height = clamp(fin(p.height, kind === 'smoke' ? 100 : 6), 0.5, PCAP.height)
   const density = clamp(fin(p.n, 1), 0.1, 2) // 1 = the recipe's own rate
   const k = kind as ParticleKind
+  const pick = (dflt: string) => (typeof p.texture === 'string' && (PARTICLE_TEXTURES as readonly string[]).includes(p.texture) ? p.texture : dflt) // the server picks the texture by name; an unknown name falls back to the kind's own
   const em: Emitter[] = []
   if (k === 'smoke') {
     // a rising column: reach = speed x lifetime (gravity 0 keeps it exact): about 150 m needs speed 14 to 16 with lifetime 10; 200 m caps at speed 20 with lifetime 10
     const lifetime = height > 60 ? 10 : clamp(height / 3, 2, 10)
     const speed = clamp(height / lifetime, 0.2, PCAP.speed)
-    const col = colorOf(p.color, [1, 0.25, 0.05])
+    const col = colorOf(p.color, [0.95, 0.1, 0.03])
     const n = height > 120 ? 2 : 1 // very tall columns: two stacked emitters (the second one starts half way up, so the density holds along the whole height)
     for (let i = 0; i < Math.min(n, PCAP.emittersPerCommand); i++) {
       em.push({
-        dx: 0, dy: i * height * 0.5, dz: 0, rate: clamp(30 * density, 1, PCAP.rate), maxParticles: PCAP.maxParticles, lifetime, gravity: 0,
-        sizeMin: size * 0.8, sizeMax: size * 1.2, sizeOverStart: 1, sizeOverEnd: 3.5,
+        dx: 0, dy: i * height * 0.5, dz: 0, rate: clamp(60 * density, 1, PCAP.rate), maxParticles: PCAP.maxParticles, lifetime, gravity: 0,
+        sizeMin: size * 1.6, sizeMax: size * 2.4, sizeOverStart: 1, sizeOverEnd: 3.5, // c24g: bigger start (the first frames showed small, faint puffs)
         speedMin: speed * 0.9, speedMax: speed * 1.1,
         shape: { kind: 'cone', angle: 6, radius: size * 0.4 },
-        colorMin: [col[0], col[1], col[2], 1], colorMax: [col[0], col[1], col[2], 1], fadeStart: [1, 0.3, 0.05, 0.9], fadeEnd: [0.25, 0.04, 0.03, 0],
-        blend: 'alpha', textured
+        colorMin: [col[0], col[1], col[2], 1], colorMax: [col[0], col[1], col[2], 1], fadeStart: [1, 0.12, 0.04, 0.95], fadeEnd: [0.3, 0.02, 0.02, 0], // saturated red to dark red, alpha blend
+        blend: 'alpha', textured, tex: pick('wisp'), up: true
       })
     }
   } else if (k === 'fire') {
     const col = colorOf(p.color, [1, 0.45, 0.05])
     const rise = clamp(height, 0.5, 30) // flames reach a few metres: the speed gives the reach over the lifetime
     em.push({
-      dx: 0, dy: 0, dz: 0, rate: clamp(60 * density, 1, PCAP.rate), maxParticles: 400, lifetime: 1.6, gravity: -0.1,
-      sizeMin: size * 0.6, sizeMax: size, sizeOverStart: 1, sizeOverEnd: 0.2,
-      speedMin: rise / 1.6 * 0.7, speedMax: rise / 1.6,
+      dx: 0, dy: 0, dz: 0, rate: clamp(80 * density, 1, PCAP.rate), maxParticles: 400, lifetime: 1.8, gravity: -0.1,
+      sizeMin: size * 2, sizeMax: size * 3.2, sizeOverStart: 1, sizeOverEnd: 0.2, // c24g: from 14 m the first flames were tiny
+      speedMin: rise / 1.8 * 0.7, speedMax: rise / 1.8,
       shape: p.shape === 'box' ? { kind: 'box', x: clamp(fin(p.width, size), 0.1, 20), y: 0.2, z: 0.3 } : { kind: 'cone', angle: 18, radius: size * 0.5 },
-      colorMin: [col[0], col[1] * 0.7, col[2], 1], colorMax: [col[0], col[1], col[2], 1], fadeStart: [1, 0.7, 0.2, 1], fadeEnd: [1, 0.1, 0, 0],
-      blend: 'add', textured
+      colorMin: [1, 0.4, 0.03, 1], colorMax: [1, 0.75, 0.12, 1], fadeStart: [1, 0.85, 0.2, 0.95], fadeEnd: [0.95, 0.15, 0, 0], // warmer: orange and yellow cores fading to red // c24g: alpha blend with saturated red and orange cores: additive washed out against a bright sky
+      blend: 'alpha', textured, tex: pick('flame'), up: true
     })
   } else {
-    const col = colorOf(p.color, [1, 0.9, 0.5])
+    const col = colorOf(p.color, [1, 0.6, 0.1])
     em.push({
-      dx: 0, dy: 0, dz: 0, rate: clamp(200 * density, 1, PCAP.rate), maxParticles: 300, lifetime: 0.6, gravity: 0.5,
-      sizeMin: Math.min(size, 0.3) * 0.5, sizeMax: Math.min(size, 0.3), sizeOverStart: 1, sizeOverEnd: 0.3,
+      dx: 0, dy: 0, dz: 0, rate: clamp(150 * density, 1, PCAP.rate), maxParticles: 300, lifetime: 0.7, gravity: 0.5,
+      sizeMin: Math.min(size, 2) * 0.3, sizeMax: Math.min(size, 2) * 0.7, sizeOverStart: 1, sizeOverEnd: 0.3,
       speedMin: 4, speedMax: clamp(6 + size * 2, 6, 14),
       shape: { kind: 'point' },
-      colorMin: [col[0], col[1], col[2], 1], colorMax: [1, 1, 1, 1], fadeStart: [1, 1, 1, 1], fadeEnd: [col[0], col[1], col[2], 0],
-      blend: 'add', textured // sparks are ADDITIVE with no texture: small squares that read as a spark field
+      colorMin: [col[0], col[1], col[2], 1], colorMax: [1, 0.9, 0.4, 1], fadeStart: [1, 0.9, 0.5, 1], fadeEnd: [col[0], col[1] * 0.5, 0, 0],
+      blend: 'alpha', textured, tex: pick('spark'), up: false // c24g: ALPHA, saturated: additive sparks vanished against the daylight sky in the real client (one look for day and night)
     })
   }
   for (const e of em) { // the final clamp: nothing above the caps leaves this function

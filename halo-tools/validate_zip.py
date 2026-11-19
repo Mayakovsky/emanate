@@ -37,7 +37,8 @@ chk('hides nothing / replaces nothing (single-slot budget)', not data.get('hides
 # ---- scene.json ----
 chk('scene.json: isPortableExperience true', sc.get('isPortableExperience') is True, sc.get('isPortableExperience'))
 chk('scene.json: runtimeVersion "7"', sc.get('runtimeVersion') == '7', sc.get('runtimeVersion'))
-chk('scene.json: requiredPermissions declared = none used', sc.get('requiredPermissions') == [], sc.get('requiredPermissions'))
+# Build 04: USE_FETCH / USE_WEBSOCKET are declared on purpose (halo <-> local game server on 127.0.0.1); nothing else may be.
+chk('scene.json: requiredPermissions only USE_FETCH / USE_WEBSOCKET (Build 04 local-server telemetry)', set(sc.get('requiredPermissions', [])) <= {'USE_FETCH', 'USE_WEBSOCKET'}, sc.get('requiredPermissions'))
 
 # ---- sizes ----
 total = sum(i.file_size for i in z.infolist())
@@ -45,7 +46,10 @@ chk('total unzipped < 3 MB', total < 3 * 1024 * 1024, f"{total} bytes ({total/10
 chk('thumbnail.png at the root', 'thumbnail.png' in names, '')
 th = z.read('thumbnail.png')
 w, h = struct.unpack('>II', th[16:24]); chk('thumbnail is 256x256 PNG', th[:8] == b'\x89PNG\r\n\x1a\n' and (w, h) == (256, 256), f"{w}x{h}")
-chk('no stray logs / loose images in the zip', not any(n.endswith('.log') or n.lower().endswith(('.png', '.jpg')) and n != 'thumbnail.png' for n in names), sorted(names))
+# c24g: the particle texture set lives in images/ (white-on-alpha PNGs, each under 4 KB, at most 8); any other loose image or log is still a failure
+imgs = [n for n in names if n.lower().endswith(('.png', '.jpg')) and n != 'thumbnail.png']
+imgs_ok = all(n.startswith('images/') and n.lower().endswith('.png') and z.getinfo(n).file_size < 4096 for n in imgs) and len(imgs) <= 8
+chk('no stray logs / loose images in the zip (images/*.png under 4 KB, at most 8, are the particle textures)', not any(n.endswith('.log') for n in names) and imgs_ok, sorted(names))
 
 # ---- the model ----
 g = z.read(mains[0])

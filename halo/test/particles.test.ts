@@ -32,8 +32,8 @@ test('smoke reach = speed x lifetime: about 150 m needs speed 14 to 16 at lifeti
   assert.ok(Math.abs((top.speedMin + top.speedMax) / 2 * top.lifetime - 200) < 1)
   assert.equal(planParticles('smoke', { height: 150 }, false)!.emitters.length, 2); assert.equal(planParticles('smoke', { height: 50 }, false)!.emitters.length, 1)
 })
-test('sparks are additive with no texture; fire is additive; smoke is alpha; the texture flag only sets `textured`', () => {
-  assert.equal(planParticles('sparks', {}, false)!.emitters[0]!.blend, 'add'); assert.equal(planParticles('fire', {}, false)!.emitters[0]!.blend, 'add'); assert.equal(planParticles('smoke', {}, false)!.emitters[0]!.blend, 'alpha')
+test('every kind is alpha blended (c24g: additive fire and sparks vanished against a daylight sky); the texture flag only sets `textured`', () => {
+  assert.equal(planParticles('sparks', {}, false)!.emitters[0]!.blend, 'alpha'); assert.equal(planParticles('fire', {}, false)!.emitters[0]!.blend, 'alpha'); assert.equal(planParticles('smoke', {}, false)!.emitters[0]!.blend, 'alpha')
   for (const k of PARTICLE_KINDS) { assert.equal(planParticles(k, {}, false)!.emitters[0]!.textured, false); assert.equal(planParticles(k, {}, true)!.emitters[0]!.textured, true) }
 })
 test('the live-emitter cap drops the oldest effects first', () => {
@@ -55,4 +55,18 @@ test('arrow ground following: the ray result sets the chevron height, no hit or 
   for (const bad of [null, undefined, NaN, -1, RAY_MAX + 0.01, Infinity]) assert.equal(chevronY(10, bad as any), 10 + LIFT)
   assert.equal(followY(null, 5, 0.016), 5); assert.equal(followY(5, 5.1, 0.016), 5.1); assert.ok(Math.abs(followY(5, 9, 0.016) - (5 + 12 * 0.016)) < 1e-9); assert.equal(followY(5, 9, 0), 5)
   assert.equal(followY(NaN, 3, 0.1), 3)
+})
+
+test('the server picks the texture by name per emitter; unknown names fall back to the kind default (c24g)', () => {
+  assert.equal(planParticles('smoke', {}, true)!.emitters[0]!.tex, 'wisp'); assert.equal(planParticles('fire', {}, true)!.emitters[0]!.tex, 'flame'); assert.equal(planParticles('sparks', {}, true)!.emitters[0]!.tex, 'spark')
+  assert.equal(planParticles('smoke', { texture: 'puff' }, true)!.emitters[0]!.tex, 'puff'); assert.equal(planParticles('fire', { texture: 'flipbook' }, true)!.emitters[0]!.tex, 'flipbook')
+  for (const bad of ['../etc/passwd', 'images/puff.png', 5, null, {}, 'PUFF']) assert.equal(planParticles('smoke', { texture: bad }, true)!.emitters[0]!.tex, 'wisp')
+})
+test('c24g smoke is bigger and denser than c24f: start size 1.6x to 2.4x the size parameter, 60 particles a second', () => {
+  const e = planParticles('smoke', { size: 2 }, false)!.emitters[0]!
+  assert.ok(Math.abs(e.sizeMin - 3.2) < 1e-9 && Math.abs(e.sizeMax - 4.8) < 1e-9); assert.equal(e.rate, 60)
+})
+
+test('smoke and fire emitters point up (turned -90 degrees about X), sparks are omnidirectional (c24g, found in the real client)', () => {
+  assert.equal(planParticles('smoke', {}, false)!.emitters[0]!.up, true); assert.equal(planParticles('fire', {}, false)!.emitters[0]!.up, true); assert.equal(planParticles('sparks', {}, false)!.emitters[0]!.up, false)
 })
