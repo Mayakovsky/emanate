@@ -9,6 +9,7 @@ import { openDialog, closeDialog, setDialogClock, dialog } from './dialog'
 import { planParticles } from './particleplan'
 import { ParticleFx, FxLib, playLib, FX_KINDS, Arrows, Plumes, ChargeArcs, DropMarkers, TrapMarkers, BubbleFx, RiftFx as BurstRiftFx, TestMarkers, EndgameFx, SkyDome, StandIn, RiftFx, AuroraFx, DistanceMarkers, CameraTests, MARKER_COLOR_NAMES, MARKER_DISTANCES, initSounds, playSlot, playSound, soundsUpdate, setRemoteAudio, audioStats, slotSource } from './fx'
 import { idle, setIdle, refetchSettings, cmdQueue, settingsInfo, refusedNote, emit, netUpdate, sendGameEvent, serverState, serverUp, probeWebSocket, probeAll, probeText, lastErr, netStatus, lastGameError, manifestUpdate, manifestInfo } from './net'
+import { replayMenuAction, cueKeyFor } from './uiplan'
 import { probeTick, probeRun, PROBE } from './probe'
 import { FXS, TICK, applyRemote, feature, say, PROTOCOL_VERSION } from './settings'
 import {
@@ -744,7 +745,7 @@ function handleServerEvent(ev: any) {
   switch (ev.ev) {
     case 'contact': contactFx = { pos: { x: ev.x, y: ev.y, z: ev.z }, until: clock + 1.5, stage: ev.stage === 'free' ? 'reset' : ev.stage }; break
     case 'warn5': playSlot('warn.five_minutes'); note('5 minutes left in the round'); break
-    case 'round-start': budget.refill(); note(say('roundStart', { round: ev.round })); playSlot('round.start'); break
+    case 'round-start': cue('round-start'); budget.refill(); note(say('roundStart', { round: ev.round })); playSlot('round.start'); break
     case 'round-complete': {
       note(`round ${ev.round} complete (${ev.side})`)
       const at = contactFx ? contactFx.pos : serverState?.synth ? { x: serverState.synth.x, y: serverState.synth.y, z: serverState.synth.z } : { x: 0, y: 0, z: 0 }
@@ -765,13 +766,13 @@ function handleServerEvent(ev: any) {
     case 'charge-broken': note('charge broken by the other side'); playSlot('charge.broken'); break
     case 'stage': note(`Synth ${ev.stage} mode`); playSlot(ev.stage === 'repair' ? 'charge.repair' : ev.stage === 'upgrade' ? 'charge.upgrade' : 'charge.reset'); break
     case 'pickup': playSlot('halo.upgrade_pickup'); note(ev.kind === 'boost' ? 'Halo boost: 30 s (applied now)' : `picked up ${ev.kind}`); break
-    case 'lobby': lobbyNote = `LOBBY: everyone into the bubble (${Math.round(ev.seconds)} s)`; note(say('lobbyCall')); playSlot('warn.upgrade'); break
+    case 'lobby': cue('lobby'); lobbyNote = `LOBBY: everyone into the bubble (${Math.round(ev.seconds)} s)`; note(say('lobbyCall')); playSlot('warn.upgrade'); break
     case 'lobby-end': lobbyNote = ''; note(say('lobbyEnd', { mode: ev.mode, count: ev.count })); playSlot('cine.rift.strike'); if (lastBubble) { burstState = { t0: clock, at: lastBubble.at, radius: lastBubble.radius }; riftOpening(lastBubble.at) }; break
     case 'lobby-wait': lobbyNote = 'waiting for the next lobby'; note('the game started without you: you wait for the next lobby'); break
     case 'teleport': serverTeleport(ev); break
     case 'toss': runCommand({ c: 'lift', altitude: Number(ev.altitude) || 100 }); probeReport('toss-event', { round: ev.round, altitude: ev.altitude }); break
     case 'trap-hit': playSlot('warn.upgrade'); note(ev.synth ? 'Discharge Trap hit the Synth' : 'Discharge Trap went off'); emit('trap-hit', { x: ev.x, z: ev.z, synth: ev.synth, players: ev.players }); break
-    case 'endgame': note(`endgame: ${ev.kind}`); break
+    case 'endgame': cue('endgame'); note(`endgame: ${ev.kind}`); break
     case 'double-agent': note('you were recruited as a double agent'); playSlot('role.double_agent'); break
   }
 }
@@ -946,6 +947,14 @@ function shiftKeys(pressed: (a: InputAction) => boolean) {
     emit('restored-test', {})
   }
 }
+// c24i: a short plain-English line for each stage, shown on the HUD line for fx.cueSeconds; the wording is the server's text (cueLobby, cueRound, cueEnding): blank or the feature `cues` off = none
+function cue(ev: string) {
+  const key = cueKeyFor(ev)
+  if (!key || !feature('cues')) return
+  const text = say(key)
+  if (!text) return
+  hudMsg = { text: text.slice(0, 160), until: clock + Math.max(2, Math.min(30, FXS.cueSeconds)) }
+}
 function dialogSync() {
   if (toastUntil > 0 && clock >= toastUntil) {
     toastUntil = 0
@@ -961,8 +970,9 @@ function dialogSync() {
   else if (st === 'doubts' && dialog.kind !== 'doubts') openDialog('doubts', clock, serverPick)
   else if (st === 'done' && (dialog.kind === 'pitch' || dialog.kind === 'doubts')) closeDialog()
   const ms = serverState.match?.state
-  if (ms === 'ended' && dialog.kind !== 'replay') openDialog('replay', clock, serverPick, { replayCount: serverState.match.replayCount ?? 0 })
-  else if (ms === 'playing' && dialog.kind === 'replay') closeDialog()
+  const act = replayMenuAction(ms, dialog.kind === 'replay') // c24i: the menu closes in EVERY state but 'ended' (a server reset into 'lobby' used to leave it stuck)
+  if (act === 'open') openDialog('replay', clock, serverPick, { replayCount: serverState.match.replayCount ?? 0 })
+  else if (act === 'close') closeDialog()
 }
 function startGlimpse(spot: Vec, seconds: number) {
   glimpse = { until: clock + seconds, spot }

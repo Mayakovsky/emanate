@@ -302,11 +302,13 @@ export class ChargeArcs {
   tick = 0
   jitter: number[] = []
   stageColor: Record<string, Color4> = {
-    free: Color4.create(0.5, 0.8, 1, 1),
-    reset: Color4.create(1, 0.95, 0.3, 1),
-    repair: Color4.create(1, 0.55, 0.15, 1),
-    upgrade: Color4.create(0.4, 1, 0.5, 1)
+    // c24i: saturated, unlit colours that hold in bright sun (the pale blue of c24h read as white in daylight), each with a thin bright core
+    free: Color4.create(0.1, 0.25, 1, 1),
+    reset: Color4.create(1, 0.75, 0.0, 1),
+    repair: Color4.create(1, 0.3, 0.0, 1),
+    upgrade: Color4.create(0.55, 0.1, 1, 1)
   }
+  cores: Entity[] = []
   private ensure() {
     if (this.segs.length) return
     for (let i = 0; i < ARC_SEGS; i++) {
@@ -315,10 +317,16 @@ export class ChargeArcs {
       MeshRenderer.setBox(e)
       Material.setBasicMaterial(e, { diffuseColor: this.stageColor.free })
       this.segs.push(e)
+      const c = engine.addEntity()
+      Transform.create(c, { position: HIDDEN, scale: HIDDEN })
+      MeshRenderer.setBox(c)
+      Material.setBasicMaterial(c, { diffuseColor: Color4.create(1, 1, 0.9, 1) })
+      this.cores.push(c)
     }
   }
   hide() {
     for (const e of this.segs) Transform.getMutable(e).scale = HIDDEN
+    for (const e of this.cores) Transform.getMutable(e).scale = HIDDEN
   }
   update(dt: number, me: Vec, synth: Vec | null, stage: string) {
     if (!synth || Math.hypot(me.x - synth.x, me.y - synth.y, me.z - synth.z) > RULES.chargeRadius) return this.hide()
@@ -346,8 +354,10 @@ export class ChargeArcs {
       const t = Transform.getMutable(this.segs[i])
       t.position = mid
       t.rotation = Quaternion.lookRotation(Vector3.normalize(dir))
-      t.scale = Vector3.create(0.07, 0.07, Math.max(0.05, len))
+      t.scale = Vector3.create(0.16, 0.16, Math.max(0.05, len))
       Material.setBasicMaterial(this.segs[i], { diffuseColor: col })
+      const ct = Transform.getMutable(this.cores[i]!)
+      ct.position = mid; ct.rotation = t.rotation; ct.scale = Vector3.create(0.05, 0.05, Math.max(0.05, len) * 1.02) // the bright core
     }
   }
 }
