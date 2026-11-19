@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { planRift, RIFT_HEIGHT, RIFT_STEP_MS } from '../src/rift.ts'
+import { planRift, RIFT_HEIGHT, RIFT_DEFAULTS } from '../src/rift.ts'
 
 test('trigger: the portal stands at the Synth height, 6 m tall, on a smoke column to the sky top', () => {
   const p = planRift({ kind: 'trigger', at: { x: 10, y: 37, z: 20 } }, 200)
@@ -34,7 +34,18 @@ test('the Synth ends far away after stepping in', () => {
 test('the Synth is never left far away: an ending parks it, a trigger leaves it to the match placement that follows', () => {
   const end = planRift({ kind: 'hunter-ending', at: { x: 5, y: 0, z: 5 } })
   const last = end.synth[end.synth.length - 1]!
-  assert.deepEqual([(last.cmd as any).x, (last.cmd as any).z], [0, -124]); assert.ok(last.afterMs <= RIFT_STEP_MS + 2000)
+  assert.deepEqual([(last.cmd as any).x, (last.cmd as any).z], [0, -124]); assert.ok(last.afterMs <= 6000)
   const trig = planRift({ kind: 'trigger', at: { x: 5, y: 2, z: 5 } })
-  assert.ok(trig.synth.every((s) => s.afterMs < RIFT_STEP_MS)); assert.ok(RIFT_STEP_MS >= 4000)
+  assert.ok(trig.endMs < 5000)
+})
+
+test('c24i: at a lobby end the oval stands 6 m from the Synth and the Synth WALKS into it (walk_to), then is moved out of sight; the walk time is a setting', () => {
+  const p = planRift({ kind: 'trigger', at: { x: 10, y: 2, z: 20 } }, 200)
+  assert.equal(p.centre.x, 16); assert.equal((p.halo.find((c) => c.kind === 'portal') as any).x, 16)
+  const walk = p.synth[0]!.cmd as any; assert.equal(walk.cmd, 'walk_to'); assert.equal(walk.x, 16); assert.equal(walk.z, 20)
+  assert.equal(p.synth[1]!.afterMs - p.synth[0]!.afterMs, RIFT_DEFAULTS.walkMs); assert.ok(Math.abs((p.synth[1]!.cmd as any).x) > 300)
+  const slow = planRift({ kind: 'trigger', at: { x: 10, y: 2, z: 20 } }, 200, { walkMs: 6000, offset: 10 })
+  assert.equal(slow.centre.x, 20); assert.equal(slow.synth[1]!.afterMs - slow.synth[0]!.afterMs, 6000); assert.equal(slow.endMs, 6400)
+  assert.equal(planRift({ kind: 'trigger', at: { x: 0, y: 0, z: 0 } }, 200, { walkMs: 1e9 }).synth[1]!.afterMs, 400 + 20_000) // clamped
+  assert.equal(planRift({ kind: 'hunter-ending', at: { x: 0, y: 0, z: 0 } }).centre.x, 0) // endings keep their own spot
 })

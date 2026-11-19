@@ -13,7 +13,7 @@ import { ParcelSet, nearestEmptyParcel } from './geo.ts'
 import { simSynth, tailWslSynth, sendSynthCommand, setSynthTransport } from './synthfeed.ts'
 import { BridgeHub, parseSync } from './bridge.ts'
 import { RateLimiter, clientIp, safeEqual, cleanTick, BODY_CAP, DEFAULT_BODY_CAP, routePath, decodeSegment, publicBase } from './security.ts'
-import { planRift, RIFT_STEP_MS } from './rift.ts'
+import { planRift, type RiftOpts } from './rift.ts'
 import { SynthBrain, lookForRound, noWorld, type World } from './synthai.ts'
 import { exposureFactor } from './hiding.ts'
 import { buildManifest, readAudioFile } from './audioserve.ts'
@@ -234,6 +234,7 @@ export function startServer(port = PORT, match: Match = makeMatch((process.env.E
             if (j.reset) halo.reset()
             return reply({ ok: true, accepted: halo.set(j.set), sv: halo.sv, overrides: halo.overrides })
           }
+          case 'rift-config': riftCfg = { ...riftCfg, ...(typeof j.walkMs === 'number' ? { walkMs: j.walkMs } : {}), ...(typeof j.offset === 'number' ? { offset: j.offset } : {}) }; return reply({ ok: true, riftCfg }) // test control: slow the Synth's walk into the Rift (walkMs) or move the oval (offset); {} resets nothing: send the defaults back
           case 'halo-cmd': return reply({ ok: halo.command(String(j.to ?? 'all'), j.command), queued: true }) // a command for one wearer's address or 'all'
           case 'halo-idle': halo.idle = j.on !== false; return reply({ ok: true, idle: halo.idle })
           case 'halo-policy': halo.policy = { minPv: Math.max(0, Math.min(99, Number(j.minPv) || 0)), message: typeof j.message === 'string' ? j.message.slice(0, 160) : halo.policy.message }; return reply({ ok: true, policy: halo.policy })
@@ -296,6 +297,7 @@ export function startServer(port = PORT, match: Match = makeMatch((process.env.E
   // ---- the roaming Synth (entry portal, stage 1, no AI). EMANATE_SYNTH_ROAM=on; it runs while no match has players ----
   const roamOn = process.env.EMANATE_SYNTH_ROAM === 'on'
   const memory = new Memory(path.join(ROOT, 'data', 'memory.json'))
+  let riftCfg: RiftOpts = {}
   const halo = new HaloControl()
   // round 24: standing halo settings from the environment (a JSON object, for example {"fx":{"plumePuffs":48}}): they survive a restart; admin halo-settings changes them live
   try { if (process.env.EMANATE_HALO_SETTINGS) halo.set(JSON.parse(process.env.EMANATE_HALO_SETTINGS)) } catch (e) { console.error('[halo settings] ignored: not valid JSON') }
@@ -391,18 +393,19 @@ export function startServer(port = PORT, match: Match = makeMatch((process.env.E
     // round 24: when a Rift opens this tick, the Synth first steps into it (rift.ts steps, about 3.5 s) and only then goes to the position the match chose (a lobby end places it for the round);
     // an ending's Synth is parked at a safe spot afterwards. The Synth must never be left far away in a dense area (a long stay 600 m off froze the scene runtime on the OVH box).
     const riftsNow = m.rifts.splice(0)
-    const riftDelayMs = riftsNow.length ? RIFT_STEP_MS : 0
+    const plans = riftsNow.map((r) => planRift(r, Number(halo.overrides.power?.ceiling ?? 200), riftCfg))
+    const riftDelayMs = plans.length ? Math.max(...plans.map((p) => p.endMs)) + 1200 : 0 // the match's placement follows the last step by 1.2 s
     for (const t of m.synthTeleports.splice(0)) {
       brain.reset()
       if (realSynth()) { const mv = { cmd: 'move', x: t.x, y: m.synth.y, z: t.z }; if (riftDelayMs) setTimeout(() => sendSynthCommand(mv as any), riftDelayMs).unref(); else sendSynthCommand(mv as any) }
     }
-    for (const r of riftsNow) {
-      // the Rift at the trigger (see rift.ts): the halo draws the portal and the smoke column; the Synth steps into it and is gone
-      const plan = planRift(r, Number(halo.overrides.power?.ceiling ?? 200))
+    riftsNow.forEach((r, i) => {
+      // the Rift at the trigger (see rift.ts): the halo draws the portal and the smoke column; the Synth walks into it and is gone
+      const plan = plans[i]!
       for (const c of plan.halo) halo.command('all', c)
       m.note('rift', { kind: r.kind, x: Math.round(plan.centre.x), y: Math.round(plan.centre.y), z: Math.round(plan.centre.z) })
       if (realSynth()) for (const st of plan.synth) setTimeout(() => sendSynthCommand(st.cmd as any), st.afterMs).unref()
-    }
+    })
     for (const line of m.synthSays.splice(0)) if (realSynth()) sendSynthCommand({ cmd: 'chat', text: line }) // the Synth speaks (the lobby call)
     const stageNow = m.synthStage()
     if (stageNow !== lastStage) {
