@@ -31,6 +31,7 @@ export const SLOT_TABLE: [string, string | null][] = [
   ['halo.boost_on', 'upgrade'],
   ['halo.arrow_overload', 'overload'],
   ['halo.denied', 'nokey'],
+  ['blast.crack', 'crackle'], // c27: the blast's crack; placeholder = the crackle tone until Forces's file is packed
   ['halo.warnings_on', 'upgrade'],
   ['halo.warnings_off', 'nokey'],
   ['cine.rift.strike', 'overload'],

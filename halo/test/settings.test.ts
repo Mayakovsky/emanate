@@ -28,9 +28,9 @@ test('hard limits keep the halo inside what Decentraland allows whatever the ser
 })
 test('a sound mapping and a long string are bounded', () => {
   resetToDefaults()
-  applyRemote({ sounds: { 'halo.plume': 'lib:cue_plume', ['x'.repeat(41)]: 'a' }, text: { gliderPrompt: 'y'.repeat(500) } })
+  applyRemote({ sounds: { 'halo.plume': 'lib:cue_plume', ['x'.repeat(41)]: 'a' }, text: { roundStart: 'y'.repeat(500) } })
   assert.equal(SOUNDS['halo.plume'], 'lib:cue_plume'); assert.equal(Object.keys(SOUNDS).length, 1)
-  assert.equal(TEXT.gliderPrompt, 'HOLD JUMP to open the glider')
+  assert.equal(TEXT.roundStart, 'round {round} started')
   resetToDefaults()
   assert.deepEqual(snapshotDefaults().sounds, {})
 })

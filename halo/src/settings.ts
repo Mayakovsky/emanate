@@ -6,7 +6,7 @@
 import { RULES } from './logic'
 
 export const PROTOCOL_VERSION = 1 // the command vocabulary and settings schema this halo understands
-export const BUILD_ID = 'c24i' // the halo build (set at release; the server logs it and may refuse an old one)
+export const BUILD_ID = 'c27m' // the halo build (set at release; the server logs it and may refuse an old one)
 
 // ---- the powers (index.ts) ----
 export const POWER = {
@@ -25,14 +25,16 @@ export const FXS = {
   riftSeconds: 3, riftRadius: 14, // the Rift opening effect at the lobby end
   liftAltitudes: 4, // how many lift targets (informational)
   particleTexture: 1, arrowGround: 0, cueSeconds: 9, // c24f candidate: particles use images/puff.png when 1 (default 1: textured); chevrons follow the ground by raycast when 1 (default 0: flat)
-  gliderPrompt: 1, gliderPromptSeconds: 4 // show the "hold JUMP to open the glider" line for this long after a tier-3 wearer leaves the ground
 }
+// ---- c27: the blast (game start). The server sends the command; these are the Halo's defaults, all server-settable ----
+// radius: the planned landing is inside this many metres of the centre; gravity: the Halo's model of the fall (calibrated on the client); apexMin/apexMax: launch height range (m); maxFy/maxFh: force ceilings; vMax: highest horizontal speed planned; bounds: the map half-size the plan stays inside
+export const BLAST = { radius: 500, gravity: 10, riseGravity: 40, apexMin: 80, apexMax: 240, maxFy: 60, maxFh: 60, kv: 6, vMax: 110, bounds: 2400, scale: 1, hold: 1, flashSeconds: 0.25, flashStrength: 0.7, bubbleRadius: 110, bubbleSeconds: 2.5, bubbleHold: 3, bubbleImplode: 1, bubbleAlpha: 0.67, rethrowCooldown: 6, callCooldown: 120, callRange: 800, cannon: 1, steer: 60, steerK: 4, steerEase: 60, vyMax: 150, gain: 1, burst: 0.15, speed: 110, rangeA: 400, rangeK: 1, elevMin: 40, elevMax: 89 }
 // ---- features: 1 on, 0 off ----
-export const FEATURES = { arrows: 1, plumes: 1, trap: 1, deadzoneWarn: 1, cinematics: 1, bubbleFx: 1, sounds: 1, debugPanel: 1, powers: 1, notes: 1, activeLine: 1, particles: 1, cues: 1 }
+export const FEATURES = { calls: 1, arrows: 1, plumes: 1, trap: 1, deadzoneWarn: 1, cinematics: 1, bubbleFx: 1, sounds: 1, debugPanel: 1, powers: 1, notes: 1, activeLine: 1, particles: 1, cues: 1 }
 // ---- text (HUD notes and the always-on line) ----
 export const TEXT: Record<string, string> = {
   activeLine: 'EMANATE halo active: sends your position to emanate.hiddenforces.net (see /privacy)',
-  gliderPrompt: 'HOLD JUMP to open the glider',
+  joinPrompt: 'Pack your bags!'+String.fromCharCode(10)+'This could hurt a little.'+String.fromCharCode(10)+'Hold E for 1.5 seconds to join.',
   idle: '',
   refused: 'This Emanate halo is out of date.',
   roundStart: 'round {round} started',
@@ -45,6 +47,7 @@ export const TEXT: Record<string, string> = {
   // c24i: stage cues, one or two short plain lines each; the server may change or blank any of them (blank = no cue for that stage)
   cueLobby: 'Step into the glowing bubble around the Synth to join.',
   cueRound: 'Chase the Synth and run into it.' + String.fromCharCode(10) + 'Press 1 for an arrow to it when it is far. Press 4 for a red smoke plume. Press E to set a trap.',
+  callPrompt: 'The Synth is calling.'+String.fromCharCode(10)+'Step into the red portal and hold E to join.',
   cueEnding: 'Go to the marked spot on the ground. When enough players are there, the ending starts.'
 }
 // ---- which sound an event plays: event slot id -> another slot id, or "lib:<name>" for a tone of the library inside the zip; "" = silent ----
@@ -54,7 +57,7 @@ export const SOUNDS: Record<string, string> = {}
 export const FINAL_NO_TEST_POWERS = false
 export const TICK = { everySec: 0.25, idlePollSec: 60 }
 
-const SECTIONS: Record<string, Record<string, any>> = { power: POWER, rules: RULES, fx: FXS, features: FEATURES, text: TEXT, sounds: SOUNDS, tick: TICK }
+const SECTIONS: Record<string, Record<string, any>> = { power: POWER, rules: RULES, fx: FXS, blast: BLAST, features: FEATURES, text: TEXT, sounds: SOUNDS, tick: TICK }
 // hard limits that keep the halo inside what Decentraland allows whatever the server says: [min, max]
 const LIMITS: Record<string, [number, number]> = {
   'power.walkSpeed': [1, 12], 'power.jogSpeed': [1, 30], 'power.runSpeed': [1, 30], 'power.jumpHeight': [0.2, 6], 'power.runJumpHeight': [0.2, 8], 'power.doubleJumpHeight': [0.2, 14],
@@ -94,7 +97,7 @@ export function applyRemote(o: any): number {
   return n
 }
 /** The built-in defaults, for the server's test and for resetting. */
-export function snapshotDefaults() { return JSON.parse(JSON.stringify({ power: POWER, rules: RULES, fx: FXS, features: FEATURES, text: TEXT, sounds: SOUNDS, tick: TICK })) }
+export function snapshotDefaults() { return JSON.parse(JSON.stringify({ power: POWER, rules: RULES, fx: FXS, blast: BLAST, features: FEATURES, text: TEXT, sounds: SOUNDS, tick: TICK })) }
 const DEFAULTS_AT_LOAD = snapshotDefaults()
 export function resetToDefaults() {
   for (const sec of Object.keys(SECTIONS)) {

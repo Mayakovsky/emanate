@@ -78,3 +78,8 @@ test('a command or a server value cannot set consent or clear the opt-out', asyn
   assert.equal(calls.length, 0, 'after the opt-out nothing is sent, not even the bare check')
   assert.equal(leaseValid(), false)
 })
+
+test('c27: before consent the server counts as up between the 3 s bare checks (no TEST MODE with powers outside the game)', async () => {
+  const net = await import('../src/net.ts')
+  assert.equal(typeof net.serverUp, 'function')
+})

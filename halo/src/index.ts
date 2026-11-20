@@ -39,11 +39,11 @@ import {
 } from '@dcl/sdk/ecs'
 import { Vector3, Color4 } from '@dcl/sdk/math'
 import { emit } from './net'
-import { gameInit, gameUpdate, gameTier, gamePlaceTrap, gameHud, gameCameraTest, hudOverlay, powersAllowed } from './game'
+import { gameInit, gameUpdate, gameTier, gamePlaceTrap, gameHud, gameCameraTest, hudOverlay, powersAllowed, blastActive, gateInfo } from './game'
 import { idle } from './net'
 import ReactEcs, { UiEntity, Label, ReactEcsRenderer } from '@dcl/sdk/react-ecs'
 import { dialogUi } from './dialog'
-import { POWER as P, feature } from './settings'
+import { POWER as P, feature, BUILD_ID } from './settings'
 
 type Tier = 0 | 1 | 2 | 3 // 0 normal (no powers), 1 Speed, 2 Jump, 3 Fly: the server decides the tier (round level, a Halo boost, a Discharge Trap hit)
 const TIER_NAMES: Record<Tier, string> = { 0: 'NORMAL', 1: 'SPRINT', 2: 'JUMP', 3: 'FLYING' }
@@ -129,11 +129,14 @@ function hudUi() {
       feature('debugPanel') && !idle ? ReactEcs.createElement(Label, { value: hudText + '\n' + o.info, fontSize: 14, textAlign: 'top-left', color: Color4.White() }) : null
     ),
     line(o.active, '0.5%', 11, Color4.create(1, 1, 1, 0.7)),
+    o.flash > 0.01 ? ReactEcs.createElement(UiEntity, { uiTransform: { positionType: 'absolute', position: { top: 0, left: 0 }, width: '100%', height: '100%', pointerFilter: 'none' }, uiBackground: { color: Color4.create(1, 1, 1, o.flash) } }) : null,
     line(o.msg, '12%', 20, Color4.create(1, 0.95, 0.5, 1)),
     line(o.prompt, '20%', 22, Color4.create(0.5, 1, 0.8, 1)),
     d
   )
 }
+let stockPrev: { x: number; z: number } | null = null
+let stockSpeed = 0
 let diving = false // set each frame by the boost code: F held and looking down
 
 function applySettings() {
@@ -164,11 +167,14 @@ function halo(dt: number) {
   if (idle || !feature('powers') || !powersAllowed()) { // c26: no consent / no lease / opt-out: the stock avatar
     // idle (the server's kill switch) or the powers switched off: the client's own locomotion, no forces
     if (tier !== 0) setTier(0)
+    hudText = 'EMANATE halo: stock avatar (' + (idle ? 'off' : powersAllowed() ? 'on' : 'not joined, paused or lease ended') + '), build ' + BUILD_ID // c27: the panel must not show the last powered frame while the wearer is stock
     AvatarLocomotionSettings.deleteFrom(engine.PlayerEntity)
     Physics.removeForceFromPlayer(BOOST_SOURCE)
     Physics.removeForceFromPlayer(BRAKE_SOURCE)
     Physics.removeForceFromPlayer(AIR_SOURCE)
     const t0 = Transform.getOrNull(engine.PlayerEntity)
+    if (t0 && stockPrev && dt > 0) { const sp = Math.hypot(t0.position.x - stockPrev.x, t0.position.z - stockPrev.z) / dt; stockSpeed = stockSpeed * 0.9 + Math.min(sp, 150) * 0.1; hudText += '  ' + gateInfo() + '  speed ' + stockSpeed.toFixed(1) + ' m/s' }
+    if (t0) stockPrev = { x: t0.position.x, z: t0.position.z }
     if (t0) try { gameUpdate(dt, Vector3.create(t0.position.x, t0.position.y, t0.position.z), 0, false, 0, 0) } catch (e) {}
     return
   }
@@ -273,7 +279,8 @@ function halo(dt: number) {
       bx += (-velSm.x / hSm) * P.brake * k
       bz += (-velSm.z / hSm) * P.brake * k
     }
-    if (bx !== 0 || by !== 0 || bz !== 0) {
+    const blasting = blastActive() // c27: the blast flies free: no speed brake, no air carry
+    if (!blasting && (bx !== 0 || by !== 0 || bz !== 0)) {
       Physics.applyForceToPlayer(BRAKE_SOURCE, Vector3.create(bx, by, bz))
     } else {
       Physics.removeForceFromPlayer(BRAKE_SOURCE)
@@ -306,7 +313,7 @@ function halo(dt: number) {
         Physics.removeForceFromPlayer(AIR_SOURCE)
       }
     }
-    if (airborne && h0 > 3 && !(tier === 3 && fHeldNow)) {
+    if (!blasting && airborne && h0 > 3 && !(tier === 3 && fHeldNow)) {
       const scale = Math.max(0, Math.min(1, (P.hMax - hSm) / 3)) // fades out toward the horizontal limit (H_MAX)
       if (scale > 0.01) Physics.applyForceToPlayer(AIR_SOURCE, Vector3.scale(carryDir, P.airCarryK * h0 * scale))
       else Physics.removeForceFromPlayer(AIR_SOURCE)

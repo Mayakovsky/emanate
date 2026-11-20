@@ -1,14 +1,16 @@
 // EMANATE Build 04: the halo's gameplay layer. Keys 1-4 (arrows, plumes), warnings, charging arcs, upgrades.
 // With the local game server up, targets come from it. Otherwise TEST MODE: fixed and moving test targets around the spawn.
-import { engine, inputSystem, InputAction, PointerEventType, PlayerIdentityData, AvatarBase, Physics } from '@dcl/sdk/ecs'
-import { Vector3 } from '@dcl/sdk/math'
+import { engine, inputSystem, InputAction, PointerEventType, PlayerIdentityData, AvatarBase, Physics, Transform, MeshRenderer, Material, MaterialTransparencyMode, type Entity } from '@dcl/sdk/ecs'
+import { Vector3, Color4 } from '@dcl/sdk/math'
 import { getPlayer } from '@dcl/sdk/players'
 import { getUserData } from '~system/UserIdentity'
+import { BLAST } from './settings'
+import { planBlast, bubbleScale } from './blastplan'
 import { skyUpdate, skyText, skyStart } from './sky'
 import { openDialog, closeDialog, setDialogClock, dialog } from './dialog'
 import { planParticles } from './particleplan'
 import { ParticleFx, FxLib, playLib, FX_KINDS, Arrows, Plumes, ChargeArcs, DropMarkers, TrapMarkers, BubbleFx, RiftFx as BurstRiftFx, TestMarkers, EndgameFx, SkyDome, StandIn, RiftFx, AuroraFx, DistanceMarkers, CameraTests, MARKER_COLOR_NAMES, MARKER_DISTANCES, initSounds, playSlot, playSound, soundsUpdate, setRemoteAudio, audioStats, slotSource } from './fx'
-import { consent, optOut, paused, setPaused, leaseValid, bare, grantConsent, doOptOut } from './net'
+import { consent, optOut, paused, setPaused, leaseValid, bare, bareFx, grantConsent, doOptOut } from './net'
 import { idle, setIdle, refetchSettings, cmdQueue, settingsInfo, refusedNote, emit, netUpdate, sendGameEvent, serverState, serverUp, lastErr, netStatus, lastGameError, manifestUpdate, manifestInfo } from './net'
 import { replayMenuAction, cueKeyFor } from './uiplan'
 import { FXS, TICK, applyRemote, feature, say, PROTOCOL_VERSION, FINAL_NO_TEST_POWERS } from './settings'
@@ -25,7 +27,7 @@ const toLocal = (p: Vec): Vec => ({ x: p.x - ORIGIN.x, y: p.y, z: p.z - ORIGIN.z
 const arrows = new Arrows()
 const fxLib = new FxLib()
 let hudMsg: { text: string; until: number } | null = null // a HUD line the server asked for
-let promptUntil = 0 // the glider prompt
+// (c27: the on-screen glider prompt is removed completely)
 let wasIdle = false
 let pushUntil = 0
 let pushForce = { x: 0, y: 0, z: 0 }
@@ -165,6 +167,7 @@ export function gameTier(base: 0 | 1 | 2 | 3): 0 | 1 | 2 | 3 {
 // player (the placer and teammates too) comes within 5 m: everyone in range drops one power level for 10 s.
 export function gamePlaceTrap() {
   if (!feature('trap') || !powersAllowed()) return
+  if (inputSystem.isPressed(InputAction.IA_WALK)) return // c27: Ctrl+E is the re-throw and Ctrl+Shift+E the pause chord, not a trap
   const world = toWorld(curMe)
   if (mode === 'server') {
     if (serverState?.you?.hasTrap) {
@@ -216,6 +219,8 @@ ${round}   keys: 1 red ${cd('red')}  2 pink ${cd('pink')}  3 dead-zone ${warning
 // ---- c26 (gate B): the wearer's own consent, the lease, the opt-out ----
 // Join: inside the lobby bubble, HOLD E for 1.5 s. Pause/leave: HOLD Ctrl + Shift + E, any time: paused at once, permanent after 3 s. Both are read here from the wearer's own keys; no server value, setting or command can set or clear them.
 let joinHold = 0
+let rethrowHold = 0
+let rethrowReady = 0 // clock time after which the next re-throw is allowed
 let optHold = 0
 let wasInside = false
 /** may powers and forces run right now? The opt-out always wins; a joined wearer needs a live lease; a wearer who never joined only gets the dev test mode (server unreachable), and only while FINAL_NO_TEST_POWERS is off. */
@@ -227,6 +232,8 @@ export function powersAllowed(): boolean {
 /** consent + a live lease: what push, lift and teleport need (and a running match, checked by the caller) */
 const joinedAndLeased = () => consent && !optOut && !paused && leaseValid()
 const matchState = (): string => (mode === 'server' ? String(serverState?.match?.state ?? '') : '')
+let gateDbg = ''
+export const gateInfo = () => gateDbg
 function gateUpdate(dt: number, world: Vec) {
   const ctrl = inputSystem.isPressed(InputAction.IA_WALK)
   const shift = inputSystem.isPressed(InputAction.IA_MODIFIER)
@@ -234,12 +241,19 @@ function gateUpdate(dt: number, world: Vec) {
   if (!optOut) {
     if (ctrl && shift && e) { setPaused(true); optHold += dt; if (optHold >= 3) { doOptOut(); note('Emanate is off. Take the halo off and put it on again to start again.') } } else { optHold = 0; if (paused) setPaused(false) } // c26: held = paused at once; released before 3 s = resumes (if consent and the lease still hold); 3 s = permanent
   }
+  // c27 (Directive M): the wearer's own re-throw: HOLD Ctrl + E for 1.5 s, only joined + leased + a running match, with a cooldown; no server value can fire it
+  if (!optOut && !paused && ctrl && !shift && e && joinedAndLeased() && matchState() === 'playing') {
+    rethrowHold += dt
+    if (rethrowHold >= 1.5 && clock >= rethrowReady) { rethrowHold = 0; rethrowReady = clock + Math.max(1, BLAST.rethrowCooldown); startBlast({ ...(lastBlastCmd ?? {}), centre: lastBlastCmd?.centre ?? 'self', seed: Math.floor(Math.random() * 4294967295), rethrow: true }) }
+  } else rethrowHold = 0
   if (optOut || consent) { joinHold = 0; return }
   const b = bare.bubble
-  const inside = !!b && Math.hypot(world.x - b.x, world.z - b.z) <= b.radius
-  if (inside && !wasInside) note('Hold E for 1.5 seconds to join the game.')
+  const inP = !!portal && Math.hypot(world.x - toWorld(portal.at).x, world.z - toWorld(portal.at).z) <= portal.radius
+  const inside = (!!b && Math.hypot(world.x - b.x, world.z - b.z) <= b.radius) || inP
+  gateDbg = 'world ' + world.x.toFixed(0) + ',' + world.z.toFixed(0) + (b ? '  bubble ' + b.x.toFixed(0) + ',' + b.z.toFixed(0) + ' dist ' + Math.hypot(world.x - b.x, world.z - b.z).toFixed(0) + '/' + b.radius : '  no bubble') + '  E-hold ' + joinHold.toFixed(1) + (inside ? '  INSIDE' : '')
+  if (inside && !wasInside) note(say('joinPrompt'))
   wasInside = inside
-  if (inside && e && !ctrl && !shift) { joinHold += dt; if (joinHold >= 1.5) { grantConsent(); joinHold = 0; note('You joined. Hold Ctrl + Shift + E for 1 second to leave.') } } else joinHold = 0
+  if (inside && e && !ctrl && !shift) { joinHold += dt; if (joinHold >= 1.5) { grantConsent(); if (inP) emit('joinCall', {}); joinHold = 0; note('You joined. Hold Ctrl + Shift + E to pause; hold it 3 seconds to leave.') } } else joinHold = 0
 }
 
 // ---- the per-frame update; me = the wearer's scene-local position ----
@@ -247,11 +261,13 @@ export function gameUpdate(dt: number, me: Vec, speed: number, airborne: boolean
   if (!started) return
   clock += dt
   gateUpdate(dt, toWorld(me))
+  mode = serverUp() ? 'server' : 'test' // c27: kept current even while gated (a stale 'test' made the panel claim TEST MODE)
   const gated = idle || optOut || paused || (!consent && (FINAL_NO_TEST_POWERS || serverUp())) // c26: before consent the Halo only does the bare check (the dev test mode, server unreachable and flag off, is the one exception)
   if (gated) {
     // the server's kill switch (or a refusal): nothing is drawn, nothing is forced, nothing is sent about the player
     if (!wasIdle) { wasIdle = true; hideAll(); emit('idle', { on: true }) }
     netUpdate(dt, { pid: myId, name: myName, pos: toWorld(me), local: me, speed, tier }) // only the bare wake-up poll runs while idle
+    if (!idle && !optOut && !paused) { bareFxUpdate(toWorld(me), me); blastLookUpdate() } else clearBareFx()
     return
   }
   if (wasIdle) { wasIdle = false; emit('idle', { on: false }) }
@@ -397,11 +413,13 @@ export function gameUpdate(dt: number, me: Vec, speed: number, airborne: boolean
   arrows.update(dt, clock, { x: me.x + velSmooth.x * 0.05, y: me.y, z: me.z + velSmooth.z * 0.05 }) // arrows are drawn in scene-local space at the feet
   fxLib.update(clock)
   if (!feature('particles')) particleFx.clear(); else particleFx.update(clock)
-  gliderPrompt(airborne, tier)
   syncPlumes(me)
   syncTraps(me, world)
   syncBubble(dt, me, world)
   liftGlideUpdate(dt, me, world, vy, airborne)
+  blastUpdate(world, vy, airborne)
+  blastLookUpdate()
+  bareFxUpdate(world, me)
   lastAirborne = airborne
   teleportCheck()
   dropMarkers.update(clock, world, drops.map((d) => ({ id: d.id!, pos: toLocal(d.pos) })).map((d) => ({ id: d.id, pos: d.pos })))
@@ -604,6 +622,178 @@ function traceReport(what: string, data: Record<string, unknown>) {
   if (mode === 'server') sendGameEvent({ ev: 'trace', what, text: JSON.stringify(data).slice(0, 380) })
   console.log('[halo] ' + what + ' ' + JSON.stringify(data))
 }
+
+// ---- c27: the blast ("Hand of God"): joined players are thrown into the sky on a random trajectory and fall; the planned ballistic landing is inside BLAST.radius of the centre ----
+const BLAST_SOURCE = engine.addEntity()
+interface Blast { phase: 'launch' | 'cruise' | 'coast'; elev: number; burst: number; fv: Vec; steer: number; t0: number; vUp: number; vh: number; dir: Vec; land: Vec; start: Vec; centre: Vec; apexPlanned: number; flightPlanned: number; maxY: number; apexAt: number; sawApex: boolean; wasAir: number; seed: number }
+let bl: Blast | null = null
+let flashUntil = 0
+let lastBlastCmd: any = null
+let blastBub: { t0: number; at: Vec } | null = null // the wearer's own blast (the others are in bubs)
+interface Bub { e: Entity; e2: Entity; t0: number; at: Vec }
+const bubs: Bub[] = []
+const seenBlasts = new Set<string>()
+let lastCallSeq = 0, callCooldownUntil = 0
+let portal: { at: Vec; until: number; e: Entity; e2: Entity; radius: number } | null = null
+/** c27 (Directive M): the blast's look = a crack (slot blast.crack), one short white flash, and the red fiery bubble that grows from the launch point (67 % opaque, soft ease) and fades; nothing else */
+function blastLook(at: Vec) {
+  playSlot('blast.crack')
+  flashUntil = clock + BLAST.flashSeconds
+  blastBub = { t0: clock, at: { ...at } }
+  spawnBub(at, clock)
+  emit('blast', {})
+  fxLib.spawn('smoke', at, clock, { size: Math.max(3, BLAST.bubbleRadius / 12), seconds: BLAST.bubbleSeconds + 3, height: BLAST.bubbleRadius, n: 24 })
+}
+function spawnBub(at: Vec, t0: number) {
+  const e = engine.addEntity()
+  Transform.create(e, { position: Vector3.create(at.x, at.y, at.z), scale: Vector3.create(0.1, 0.1, 0.1) })
+  MeshRenderer.setSphere(e)
+  Material.setPbrMaterial(e, { albedoColor: Color4.create(1, 0.18, 0.04, BLAST.bubbleAlpha), emissiveColor: Color4.create(1, 0.35, 0.05, 1), emissiveIntensity: 1.6, transparencyMode: MaterialTransparencyMode.MTM_ALPHA_BLEND, metallic: 0, roughness: 1 })
+  // a second sphere with a NEGATIVE scale shows the inside faces: the wearer, still inside while it grows, sees the red fire around them
+  const e2 = engine.addEntity()
+  Transform.create(e2, { position: Vector3.create(at.x, at.y, at.z), scale: Vector3.create(-0.1, 0.1, 0.1) })
+  MeshRenderer.setSphere(e2)
+  Material.setPbrMaterial(e2, { albedoColor: Color4.create(1, 0.18, 0.04, BLAST.bubbleAlpha), emissiveColor: Color4.create(1, 0.35, 0.05, 1), emissiveIntensity: 1.6, transparencyMode: MaterialTransparencyMode.MTM_ALPHA_BLEND, metallic: 0, roughness: 1 })
+  bubs.push({ e, e2, t0, at: { ...at } })
+}
+function blastLookUpdate() {
+  const E = Math.max(0.2, BLAST.bubbleSeconds), H = Math.max(0, BLAST.bubbleHold), I = Math.max(0.2, BLAST.bubbleImplode)
+  if (blastBub && clock - blastBub.t0 > E + H + I) blastBub = null
+  for (let i = bubs.length - 1; i >= 0; i--) {
+    const b = bubs[i]!
+    const k = bubbleScale(clock - b.t0, E, H, I)
+    if (k <= 0 && clock - b.t0 > 0.1) { engine.removeEntity(b.e); engine.removeEntity(b.e2); bubs.splice(i, 1); continue }
+    const r = Math.max(0.05, BLAST.bubbleRadius * k)
+    Transform.getMutable(b.e).scale = Vector3.create(r * 2, r * 2, r * 2)
+    Transform.getMutable(b.e2).scale = Vector3.create(-r * 2, r * 2, r * 2)
+  }
+}
+/** c27 (Directive N): what every Halo can see without sending anything: other wearers' blast bubbles (from the server's list of recent launches) and the call: a red portal near a far wearer, who answers by stepping in and holding E */
+function bareFxUpdate(world: Vec, me: Vec) {
+  const dur = BLAST.bubbleSeconds + BLAST.bubbleHold + BLAST.bubbleImplode
+  for (const b of bareFx.blasts) {
+    if (b.age >= dur) continue
+    const key = Math.round(b.x) + ',' + Math.round(b.z) + ',' + Math.round(clock - b.age)
+    if ([...seenBlasts].some((k) => { const q = k.split(','); return Math.hypot(+q[0]! - b.x, +q[1]! - b.z) < 6 && Math.abs(+q[2]! - (clock - b.age)) < 3 })) continue
+    if (blastBub && Math.hypot(toWorld(blastBub.at).x - b.x, toWorld(blastBub.at).z - b.z) < 6 && Math.abs(blastBub.t0 - (clock - b.age)) < 3) continue // my own launch, already drawn
+    seenBlasts.add(key); if (seenBlasts.size > 80) seenBlasts.delete(seenBlasts.values().next().value as string)
+    if (Math.hypot(world.x - b.x, world.z - b.z) > BLAST.callRange) continue // only wearers in range
+    spawnBub(toLocal({ x: b.x, y: b.y, z: b.z }), clock - b.age)
+  }
+  const c = bareFx.call
+  if (c && feature('calls') && !consent && c.seq !== lastCallSeq && clock >= callCooldownUntil && !portal) {
+    lastCallSeq = c.seq
+    const far = Math.hypot(world.x - c.x, world.z - c.z)
+    if (far > c.far && far < BLAST.callRange * 20) { // only wearers outside the near zone; they get the portal 10 m ahead of them
+      callCooldownUntil = clock + BLAST.callCooldown
+      const t = Transform.getOrNull(engine.PlayerEntity)
+      const f = t ? Vector3.rotate(Vector3.Forward(), t.rotation) : Vector3.Forward()
+      const at = { x: me.x + f.x * 10, y: me.y, z: me.z + f.z * 10 }
+      const mk = (neg: boolean) => { const e = engine.addEntity(); Transform.create(e, { position: Vector3.create(at.x, at.y + c.radius * 0.5, at.z), scale: Vector3.create((neg ? -1 : 1) * c.radius * 2, c.radius * 2, c.radius * 2) }); MeshRenderer.setSphere(e); Material.setPbrMaterial(e, { albedoColor: Color4.create(1, 0.18, 0.04, BLAST.bubbleAlpha), emissiveColor: Color4.create(1, 0.35, 0.05, 1), emissiveIntensity: 1.6, transparencyMode: MaterialTransparencyMode.MTM_ALPHA_BLEND, metallic: 0, roughness: 1 }); return e }
+      portal = { at, until: clock + Math.min(c.left, 60), e: mk(false), e2: mk(true), radius: c.radius }
+      fxLib.spawn('smoke', at, clock, { size: Math.max(2, c.radius / 3), seconds: 12, height: 40, n: 16 })
+      note(say('callPrompt'))
+    }
+  }
+  if (portal) {
+    if (clock > portal.until || consent) { engine.removeEntity(portal.e); engine.removeEntity(portal.e2); portal = null }
+    else { const k = 1 + 0.03 * Math.sin(clock * 2); const r = portal.radius * 2 * k; Transform.getMutable(portal.e).scale = Vector3.create(r, r, r); Transform.getMutable(portal.e2).scale = Vector3.create(-r, r, r) }
+  }
+}
+function clearBareFx() {
+  for (const b of bubs) { engine.removeEntity(b.e); engine.removeEntity(b.e2) }
+  bubs.length = 0
+  if (portal) { engine.removeEntity(portal.e); engine.removeEntity(portal.e2); portal = null }
+}
+export const blastActive = () => bl !== null
+function startBlast(c: any) {
+  if (!c.rethrow) lastBlastCmd = { centre: c.centre, cx: c.cx, cz: c.cz, radius: c.radius, scale: c.scale, speed: c.speed, elev: undefined }
+  if (!joinedAndLeased() || matchState() !== 'playing') return
+  if (bl) { Physics.removeForceFromPlayer(BLAST_SOURCE); bl = null }
+  const w = toWorld(curMe)
+  const centre = c.centre === 'self' || c.cx === undefined ? w : { x: num(c.cx, w.x), y: 0, z: num(c.cz, w.z) }
+  const radius = Math.max(1, Math.min(2000, num(c.radius, BLAST.radius)))
+  const seed0 = Math.floor(num(c.seed, Math.random() * 4294967295))
+  const seed = c.mix ? (seed0 ^ Math.floor(Math.random() * 4294967295)) >>> 0 : seed0 >>> 0 // an event for everyone carries ONE seed: each wearer mixes in their own luck so every wearer flies a different path; an admin test command keeps the exact seed
+  const p = planBlast(w, centre, radius, seed, BLAST, Math.max(0.1, Math.min(4, num(c.scale, BLAST.scale))))
+  bl = { phase: 'launch', elev: 0, burst: 0, fv: { x: 0, y: 0, z: 0 }, steer: 0, t0: clock, vUp: p.vUp, vh: p.vh, dir: p.dir, land: p.land, start: w, centre, apexPlanned: p.apex, flightPlanned: p.flight, maxY: w.y, apexAt: 0, sawApex: false, wasAir: 0, seed }
+  if (BLAST.cannon >= 1) { // c27 (Directive L): a cannonball. ONE impulse at the start (near top speed), then nothing: the game's own gravity brings the wearer down. The elevation comes from the planned distance (range = rangeA x cos(elev)^rangeK), or c.elev / c.az (degrees) for a calibration shot.
+    const S = Math.max(1, Math.min(300, num(c.speed, BLAST.speed)))
+    let elev = 0, dirx = p.dir.x, dirz = p.dir.z, vertOnly = false
+    if (typeof c.elev === 'number' && Number.isFinite(c.elev)) { elev = Math.max(1, Math.min(89.5, c.elev)); const az = (num(c.az, 0) * Math.PI) / 180; dirx = Math.cos(az); dirz = Math.sin(az) }
+    else { elev = 90; vertOnly = true }
+    const er = (elev * Math.PI) / 180
+    const vxz = vertOnly ? 0 : S * Math.cos(er), vyy = vertOnly ? Math.min(BLAST.vyMax, Math.sqrt(2 * BLAST.riseGravity * p.apex)) : S * Math.sin(er) // apex target -> launch speed (the client's rise gravity is about 40); the planned apex is inside the coded ceiling
+    bl.phase = 'coast'; bl.elev = elev; bl.vUp = vyy; bl.vh = vxz; bl.dir = { x: dirx, y: 0, z: dirz }
+    const G = Math.max(0.1, Math.min(2000, num(c.gain, BLAST.gain))); const B = Math.max(0.05, Math.min(3, num(c.burst, BLAST.burst))) // the client clips an impulse to about 28 m/s: the launch is a short burst of force instead
+    bl.steer = Math.max(0, Math.min(60, num(c.steer, BLAST.steer)))
+    bl.burst = B; bl.fv = { x: (dirx * vxz * G) / B, y: (vyy * G) / B, z: (dirz * vxz * G) / B }
+    blastLook(toLocal(w))
+    traceReport('blast', { cannon: true, gain: +G.toFixed(2), burst: B, seed, speed: +S.toFixed(1), elev: +elev.toFixed(1), az: +((Math.atan2(dirz, dirx) * 180) / Math.PI).toFixed(1), vxz: +vxz.toFixed(1), vy: +vyy.toFixed(1), start: w, planned: p.land, dist: +p.dist.toFixed(0) })
+    return
+  }
+  blastLook(toLocal(w))
+  traceReport('blast', { start: w, centre, radius, seed, planned: p.land, dist: +p.dist.toFixed(0), apex: +p.apex.toFixed(0), vUp: +p.vUp.toFixed(1), vh: +p.vh.toFixed(1), flight: +p.flight.toFixed(1) })
+}
+function blastEnd(why: string, world: Vec) {
+  const s = bl; if (!s) return
+  Physics.removeForceFromPlayer(BLAST_SOURCE); bl = null
+  traceReport('blast', { end: why, seed: s.seed, planned: s.land, landed: { x: +world.x.toFixed(1), y: +world.y.toFixed(1), z: +world.z.toFixed(1) }, errPlanned: +Math.hypot(world.x - s.land.x, world.z - s.land.z).toFixed(1), fromCentre: +Math.hypot(world.x - s.centre.x, world.z - s.centre.z).toFixed(1), apexReached: +(s.maxY - s.start.y).toFixed(1), apexPlanned: +s.apexPlanned.toFixed(1), flightSeconds: +(clock - s.t0).toFixed(1), flightPlanned: +s.flightPlanned.toFixed(1), vUp: +s.vUp.toFixed(1), vh: +s.vh.toFixed(1) })
+}
+function blastUpdate(world: Vec, vy: number, airborne: boolean) {
+  const s = bl; if (!s) return
+  if (!joinedAndLeased()) { blastEnd('no-lease', world); return }
+  const age = clock - s.t0
+  s.maxY = Math.max(s.maxY, world.y)
+  if (s.phase === 'coast') { // the cannonball
+    if (age < s.burst) Physics.applyForceToPlayer(BLAST_SOURCE, Vector3.create(s.fv.x, s.fv.y, s.fv.z)); else if (s.burst > 0) { s.burst = 0; Physics.removeForceFromPlayer(BLAST_SOURCE) } // the launch burst, then no forces at all; log the real launch speed, mark the apex, end on landing
+    if (s.steer > 0 && age >= s.burst) { // c27 (approved by Desktop): a gentle horizontal force toward the planned landing point: capped, eased out over the last metres, off at touchdown; NO vertical help, NO brake
+      const rx = s.land.x - world.x, rz = s.land.z - world.z, rd = Math.hypot(rx, rz)
+      const h = Math.max(0, world.y - s.start.y)
+      const trem = vy > 0 ? vy / BLAST.riseGravity + Math.sqrt(2 * (h + (vy * vy) / (2 * BLAST.riseGravity)) / BLAST.gravity) : (-vy + Math.sqrt(vy * vy + 2 * BLAST.gravity * h)) / BLAST.gravity
+      const want = Math.min(BLAST.vMax, rd / Math.max(0.5, trem))
+      const ux = rx / Math.max(1e-6, rd), uz = rz / Math.max(1e-6, rd)
+      const along = velSmooth.x * ux + velSmooth.z * uz
+      const ease = Math.min(1, rd / Math.max(1, BLAST.steerEase))
+      const f = Math.max(0, Math.min(s.steer, BLAST.steerK * (want - along))) * ease
+      if (!(s.wasAir > 0 && !airborne) && f > 0.05) Physics.applyForceToPlayer(BLAST_SOURCE, Vector3.create(ux * f, 0, uz * f)); else Physics.removeForceFromPlayer(BLAST_SOURCE)
+    }
+    if (airborne) s.wasAir = Math.max(s.wasAir, age)
+    if (!s.sawApex && age > 0.25 && age < 0.6 && s.apexAt === 0) { s.apexAt = -1; traceReport('blast', { sample: true, seed: s.seed, t: +age.toFixed(2), vy: +vy.toFixed(1), vxz: +Math.hypot(velSmooth.x, velSmooth.z).toFixed(1), y: +(world.y - s.start.y).toFixed(1) }) }
+    if (!s.sawApex && vy <= 0.5 && age > 0.5) { s.sawApex = true; traceReport('blast', { apex: true, seed: s.seed, y: +(world.y - s.start.y).toFixed(1), t: +age.toFixed(1), x: +world.x.toFixed(0), z: +world.z.toFixed(0) }) }
+    if (age > 2 && !airborne && s.wasAir > 0) blastEnd('landed', world)
+    else if (age > 60) blastEnd('timeout', world)
+    return
+  }
+  if (airborne) s.wasAir = Math.max(s.wasAir, age)
+  const hv = velSmooth // horizontal velocity of the wearer (scene-local axes = world axes)
+  // c27: closed loop. After the launch the horizontal speed is re-planned every frame so the ballistic landing hits the planned point whatever the real rise/fall did: remaining distance / estimated remaining flight time (rise at riseGravity, fall at gravity, ground = the start height)
+  let dirx = s.dir.x, dirz = s.dir.z, vhT = s.vh
+  if (s.phase === 'cruise') {
+    const gr = BLAST.riseGravity, gf = BLAST.gravity
+    const h = Math.max(0, world.y - s.start.y)
+    const rx = s.land.x - world.x, rz = s.land.z - world.z, rd = Math.hypot(rx, rz)
+    const trem = vy > 0 ? vy / gr + Math.sqrt(2 * (h + (vy * vy) / (2 * gr)) / gf) : (-vy + Math.sqrt(vy * vy + 2 * gf * h)) / gf
+    if (rd > 1 && trem > 0.2) { dirx = rx / rd; dirz = rz / rd; vhT = Math.min(BLAST.vMax, rd / trem) } else vhT = 0
+  }
+  const along = hv.x * dirx + hv.z * dirz
+  const ex = dirx * vhT - hv.x, ez = dirz * vhT - hv.z
+  let fy = 0
+  if (s.phase === 'launch') {
+    fy = Math.max(0, Math.min(BLAST.maxFy, BLAST.kv * (s.vUp - vy) + BLAST.riseGravity)) // gravity rises to riseGravity while rising: the force must beat it
+    if (vy >= s.vUp * 0.97 || age > 4) { s.phase = 'cruise'; traceReport('blast', { launched: true, seed: s.seed, t: +age.toFixed(2), y: +(world.y - s.start.y).toFixed(1), vy: +vy.toFixed(1), vh: +Math.hypot(hv.x, hv.z).toFixed(1) }) }
+  } else if (!s.sawApex && vy <= 0.5 && age > 0.5) {
+    s.sawApex = true; s.apexAt = age
+    traceReport('blast', { apex: true, seed: s.seed, y: +world.y.toFixed(1), t: +age.toFixed(1), x: +world.x.toFixed(0), z: +world.z.toFixed(0), vh: +along.toFixed(1) })
+  }
+  const jumpHeld = inputSystem.isPressed(InputAction.IA_JUMP) && s.sawApex // the wearer opened the glider: the blast lets go of the course
+  const fh = (e: number) => Math.max(-BLAST.maxFh, Math.min(BLAST.maxFh, BLAST.kv * e))
+  if (BLAST.hold >= 1 && !jumpHeld) Physics.applyForceToPlayer(BLAST_SOURCE, Vector3.create(fh(ex), fy, fh(ez)))
+  else if (fy > 0) Physics.applyForceToPlayer(BLAST_SOURCE, Vector3.create(0, fy, 0))
+  else Physics.removeForceFromPlayer(BLAST_SOURCE)
+  if (age > 2 && !airborne && s.wasAir > 0) blastEnd('landed', world)
+  else if (age > s.flightPlanned * 1.8 + 8) blastEnd('timeout', world)
+}
 const LIFT_SOURCE = engine.addEntity()
 const LIFT_TARGETS = [50, 100, 150, 200]
 let liftIdx = 0
@@ -637,7 +827,6 @@ function liftGlideUpdate(dt: number, me: Vec, world: Vec, vy: number, airborne: 
       s.tRelease = clock
       s.release = { ...world }
       s.wasAir = true
-      promptUntil = clock + 12
       traceReport('lift-glide', { released: true, y: world.y, liftSeconds: +(clock - s.t0).toFixed(1), x: world.x, z: world.z })
     }
     return
@@ -753,6 +942,7 @@ function handleServerEvent(ev: any) {
     case 'lobby-end': lobbyNote = ''; note(say('lobbyEnd', { mode: ev.mode, count: ev.count })); playSlot('cine.rift.strike'); if (lastBubble) { burstState = { t0: clock, at: lastBubble.at, radius: lastBubble.radius }; riftOpening(lastBubble.at) }; break
     case 'lobby-wait': lobbyNote = 'waiting for the next lobby'; note('the game started without you: you wait for the next lobby'); break
     case 'teleport': serverTeleport(ev); break
+    case 'blast': runCommand({ ...ev, c: 'blast', mix: 1 }); break
     case 'toss': runCommand({ c: 'lift', altitude: Number(ev.altitude) || 100 }); traceReport('toss-event', { round: ev.round, altitude: ev.altitude }); break
     case 'trap-hit': playSlot('warn.upgrade'); note(ev.synth ? 'Discharge Trap hit the Synth' : 'Discharge Trap went off'); emit('trap-hit', { x: ev.x, z: ev.z, synth: ev.synth, players: ev.players }); break
     case 'endgame': cue('endgame'); note(`endgame: ${ev.kind}`); break
@@ -1011,14 +1201,15 @@ function runCommand(c: Record<string, unknown>) {
       fxLib.spawn(c.kind, at, clock, { size: num(c.size, 3), seconds: num(c.seconds, 3), color: c.color, n: num(c.n, 12), height: num(c.height, 20), heading: num(c.heading, 0) })
       break
     }
-    case 'push': { // { x,y,z, seconds }: a force on the wearer for a while (c26: only joined + leased + a running match; push 15 horizontal, 25 vertical, 3 s)
+    case 'push': { // { x,y,z, seconds }: a force on the wearer for a while (c27: only joined + leased + a running match; the c26 clamps are gone: sanity limits only, the original -40..40 / -40..60, 0.1..10 s)
       if (!joinedAndLeased() || matchState() !== 'playing') break
-      const f = { x: Math.max(-15, Math.min(15, num(c.x, 0))), y: Math.max(-15, Math.min(25, num(c.y, 0))), z: Math.max(-15, Math.min(15, num(c.z, 0))) }
+      const f = { x: Math.max(-40, Math.min(40, num(c.x, 0))), y: Math.max(-40, Math.min(60, num(c.y, 0))), z: Math.max(-40, Math.min(40, num(c.z, 0))) }
       pushForce = f
-      pushUntil = clock + Math.max(0.1, Math.min(3, num(c.seconds, 1)))
+      pushUntil = clock + Math.max(0.1, Math.min(10, num(c.seconds, 1)))
       break
     }
-    case 'lift': if (joinedAndLeased() && matchState() === 'playing') startLiftGlide(toWorld(curMe), Math.max(20, Math.min(120, num(c.altitude, 100)))); break // c26: joined + leased + a running match; 20..120 m // the lift-and-glide start: the halo lifts, releases, and prompts for the glider
+    case 'lift': if (joinedAndLeased() && matchState() === 'playing') startLiftGlide(toWorld(curMe), Math.max(20, Math.min(220, num(c.altitude, 100)))); break // joined + leased + a running match; 20..220 m (c27: the c26 120 m cap is gone) // the lift-and-glide start: the halo lifts, releases, and prompts for the glider
+    case 'blast': startBlast(c); break
     case 'teleport': serverTeleport(c); break
     case 'tick': applyRemote({ tick: { everySec: num(c.every, TICK.everySec) } }); break
     case 'feature': if (typeof c.name === 'string') applyRemote({ features: { [c.name]: c.on === false || c.on === 0 ? 0 : 1 } }); break
@@ -1031,10 +1222,6 @@ function riftOpening(at: Vec) {
   // the Rift opening as its own effect: the lobby bubble's centre
   fxLib.spawn('portal', at, clock, { size: 5, seconds: 10, height: 18, color: 'red' })
   fxLib.spawn('smoke', { x: at.x, y: at.y, z: at.z + 5 }, clock, { size: 5, seconds: 10, height: 200, n: 30 })
-}
-function gliderPrompt(airborne: boolean, tier: number) {
-  if (airborne && !lastAirborne && tier >= 3 && FXS.gliderPrompt > 0) promptUntil = clock + FXS.gliderPromptSeconds
-  if (inputSystem.isPressed(InputAction.IA_JUMP) && promptUntil > 0 && clock - (promptUntil - FXS.gliderPromptSeconds) > 1) promptUntil = 0 // jump is held: the glider is being opened
 }
 function hideAll() {
   for (const k of Object.keys(arrows.runs) as (keyof typeof arrows.runs)[]) arrows.runs[k].target = null
@@ -1055,14 +1242,14 @@ function hideAll() {
   closeDialog()
   Physics.removeForceFromPlayer(PUSH_SOURCE)
   hudMsg = null
-  promptUntil = 0
 }
 /** the lines index.ts draws on screen: the always-on honest line, a server message, the glider prompt */
 export function hudOverlay() {
   return {
     active: idle ? '' : feature('activeLine') ? say('activeLine') : '',
     msg: idle ? (refusedNote || say('idle')) : hudMsg && clock < hudMsg.until ? hudMsg.text : '',
-    prompt: !idle && promptUntil > clock ? say('gliderPrompt') : '',
+    prompt: '',
+    flash: !idle && flashUntil > clock ? Math.max(0, Math.min(1, ((flashUntil - clock) / Math.max(0.05, BLAST.flashSeconds)) * BLAST.flashStrength)) : 0,
     info: settingsInfo()
   }
 }
