@@ -48,6 +48,13 @@ export const CONFIG = {
   coopSynthMin: 100, // Coop and Multiplayer: players start where they stand in every round; the Synth is placed this far
   coopSynthMax: 300, // ... to this far from the group's centre
   tossStartRounds: [] as number[], // the lift-and-glide start in these rounds (rounds 1 and 2 only; default off until Forces has tried it)
+  blastStart: false, // c27: at the start of round 1 every joined Halo is blasted into the sky (env EMANATE_BLAST_START=on turns it on)
+  blastCentre: 'self' as 'self' | 'synth', // the planned landing is within blastRadius of the wearer ('self') or of the Synth ('synth')
+  blastRadius: 500, // m
+  callsEnabled: true, // c27: the call to far wearers (the `calls` switch)
+  callThreshold: 2, // the estimated number of Halos checking in (from the anonymous check-in rate) needed before a lobby start is called out
+  callSeconds: 45, // how long the call stays up
+  callMinFarMetres: 50, // the Halo shows the portal only to wearers farther than this from the Synth
   tossAltitude: 150, // m: how high the lift goes (the halo's limit is 200 m)
   completeFreezeSeconds: 0, // the Synth freezes this long after a completed Charge before it is teleported (the server turns on 2 s; 0 keeps the tests instant)
   multiplayerWinsNeeded: 3, // Multiplayer: the first side to win this many rounds wins; a timed-out round does not count

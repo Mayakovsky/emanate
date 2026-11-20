@@ -32,6 +32,11 @@ const HOST = process.env.EMANATE_HOST ?? '127.0.0.1' // behind Caddy keep 127.0.
 // read when the server starts (not at import) so tests can set them
 const ADMIN_ROUTES = new Set(['/state', '/admin', '/roam', '/synthbrain', '/pulsecheck'])
 const ROOT = path.join(import.meta.dirname, '..')
+// c27: what every Halo may see without any player data: the launches of the last few seconds (so the blast bubble is drawn for everyone in range) and the call
+const bareChecks: number[] = []
+const blastLog: { x: number; y: number; z: number; at: number }[] = []
+let callSeq = 0, callUntil = 0, callAt = { x: 0, y: 0, z: 0, radius: 10 }, lastLobbyBubble = false
+const CHECKS_PER_MIN = 20 // a Halo outside the game checks every 3 s
 const LOGDIR = path.join(ROOT, 'logs')
 const AUDIO_DIR = path.join(ROOT, 'audio')
 fs.mkdirSync(LOGDIR, { recursive: true })
@@ -64,7 +69,7 @@ export function makeMatch(mode: Mode = 'solo') {
     now: Date.now,
     rng: Math.random,
     deadZones,
-    cfg: { ...CONFIG, completeFreezeSeconds: Number(process.env.EMANATE_FREEZE ?? 2), teleportStart: process.env.EMANATE_TELEPORT_START === 'on', lobbyEnabled: process.env.EMANATE_LOBBY === 'on', lobbySeconds: Number(process.env.EMANATE_LOBBY_SECONDS ?? CONFIG.lobbySeconds), tossStartRounds: (process.env.EMANATE_TOSS_ROUNDS ?? '').split(',').map(Number).filter((n) => n === 1 || n === 2) }, // the Synth freezes for a moment after a completed Charge, then is teleported
+    cfg: { ...CONFIG, completeFreezeSeconds: Number(process.env.EMANATE_FREEZE ?? 2), teleportStart: process.env.EMANATE_TELEPORT_START === 'on', blastStart: process.env.EMANATE_BLAST_START === 'on', blastCentre: process.env.EMANATE_BLAST_CENTRE === 'synth' ? 'synth' : 'self', lobbyEnabled: process.env.EMANATE_LOBBY === 'on', lobbySeconds: Number(process.env.EMANATE_LOBBY_SECONDS ?? CONFIG.lobbySeconds), tossStartRounds: (process.env.EMANATE_TOSS_ROUNDS ?? '').split(',').map(Number).filter((n) => n === 1 || n === 2) }, // the Synth freezes for a moment after a completed Charge, then is teleported
     emptyParcelFinder: (x, z) => nearestEmptyParcel(empty, x, z)?.center ?? null
   })
   m.setMode(mode)
@@ -88,6 +93,18 @@ const MAX_PLAYERS = Number(process.env.EMANATE_MAX_PLAYERS ?? 64)
   if (ADMIN_TOKEN && ADMIN_TOKEN.length < 16) throw new Error('EMANATE_ADMIN_TOKEN is too short (use at least 16 random characters)')
   if (process.env.EMANATE_BRIDGE_TOKEN && process.env.EMANATE_BRIDGE_TOKEN.length < 16) throw new Error('EMANATE_BRIDGE_TOKEN is too short (use at least 16 random characters)')
   let m = match
+  function playersAvailable() { return Math.round(bareChecks.length / CHECKS_PER_MIN) + m.players.size }
+  function publicFx() {
+    const now = Date.now()
+    const blasts = blastLog.filter((b) => now - b.at < 9000).slice(-30).map((b) => ({ x: +b.x.toFixed(1), y: +b.y.toFixed(1), z: +b.z.toFixed(1), age: +((now - b.at) / 1000).toFixed(1) }))
+    const call = CONFIG.callsEnabled && now < callUntil ? { seq: callSeq, x: callAt.x, y: callAt.y, z: callAt.z, radius: callAt.radius, left: Math.round((callUntil - now) / 1000), far: CONFIG.callMinFarMetres } : null
+    return { blasts, call }
+  }
+  setInterval(() => { // c27: a lobby start is the player asking the Synth to play; if enough Halos are about, the call goes out (once per lobby)
+    const has = !!m.bubble
+    if (has && !lastLobbyBubble && CONFIG.callsEnabled && playersAvailable() >= CONFIG.callThreshold) { callSeq++; callUntil = Date.now() + CONFIG.callSeconds * 1000; callAt = { x: m.bubble!.x, y: m.bubble!.y, z: m.bubble!.z, radius: m.bubble!.radius } }
+    lastLobbyBubble = has
+  }, 1000).unref()
   let synthSource = 'none'
   const realSynth = () => synthSource === 'wsl' || synthSource === 'bridge' // a real Synth is driven: local log/FIFO or through the bridge
   const bridge = process.env.EMANATE_SYNTH === 'bridge' && process.env.EMANATE_BRIDGE_TOKEN ? new BridgeHub(process.env.EMANATE_BRIDGE_TOKEN) : null
@@ -168,6 +185,8 @@ const MAX_PLAYERS = Number(process.env.EMANATE_MAX_PLAYERS ?? 64)
         for (const e of t.events) {
           if (e.ev === 'plume') m.plume(t.pid, t.pos)
           if (e.ev === 'trace') { try { fs.appendFileSync(path.join(LOGDIR, 'halo-probes.jsonl'), JSON.stringify({ t: new Date().toISOString(), pid: t.pid.slice(0, 10), what: e.what, text: e.text }) + String.fromCharCode(10)) } catch {} }
+          if (e.ev === 'blast') { blastLog.push({ x: t.pos.x, y: t.pos.y, z: t.pos.z, at: Date.now() }); while (blastLog.length > 60) blastLog.shift() }
+          if (e.ev === 'joinCall') m.callJoin(t.pid)
           if (e.ev === 'trap') m.placeTrap(t.pid, t.pos) // E: the Discharge Trap, placed where the player stands
           if (e.ev === 'choice') m.choose(t.pid, String(e.pick))
           if (e.ev === 'replay') m.replay(e.kind === 'round' ? 'round' : 'again', Number(e.round ?? 1))
@@ -179,12 +198,13 @@ const MAX_PLAYERS = Number(process.env.EMANATE_MAX_PLAYERS ?? 64)
         const inBubble = !!b && Math.hypot(b.x - t.pos.x, b.z - t.pos.z) <= b.radius * 1.2
         const joined = m.players.has(t.pid) || inBubble
         const inactive = Date.now() - (movedAt.get(t.pid)?.at ?? Date.now()) > INACTIVE_MS
-        return reply({ ok: true, state: m.snapshot(p.id), idle: false, ...(joined && !inactive ? { lease: LEASE_SECONDS } : {}), ...halo.forTick(t.pid, t.sv) })
+        return reply({ ok: true, state: m.snapshot(p.id), idle: false, ...(joined && !inactive ? { lease: LEASE_SECONDS } : {}), ...publicFx(), ...halo.forTick(t.pid, t.sv) })
       }
       if (url === '/halo/state' && req.method === 'GET') {
+        bareChecks.push(Date.now()); while (bareChecks.length && bareChecks[0]! < Date.now() - 60_000) bareChecks.shift() // anonymous check-in rate: times only, no id, no address
         const pvq = Number(new URL(req.url ?? '/', 'http://x').searchParams.get('pv'))
         const bb = m.bubble // c26: the bare check also says whether a lobby exists and where its bubble is (no player data): a not-yet-joined Halo compares its own position to it locally
-        return reply({ ok: true, ...halo.publicState(Number.isFinite(pvq) ? pvq : undefined), lobby: !!bb, bubble: bb ? { x: bb.x, y: bb.y, z: bb.z, radius: bb.radius } : null }) // no player data either way
+        return reply({ ok: true, ...halo.publicState(Number.isFinite(pvq) ? pvq : undefined), lobby: !!bb, bubble: bb ? { x: bb.x, y: bb.y, z: bb.z, radius: bb.radius } : null, ...publicFx() }) // no player data either way
       }
       // Admin and debug routes: only when a separate admin token is set (or the local DEV mode on loopback); a wrong token counts against the address.
       if (ADMIN_ROUTES.has(url)) {
@@ -256,6 +276,14 @@ const MAX_PLAYERS = Number(process.env.EMANATE_MAX_PLAYERS ?? 64)
           case 'end-match': (m as any).finish(j.winner ?? 'hunters'); break // test: jump to the Ending so the replay menu can be reached
           case 'roam-config': Object.assign(roam.cfg, j.config ?? {}); break
           case 'teleport': for (const p of [...m.players.values()]) if (!j.pid || p.id === j.pid) m.teleportPlayer(p.id, { x: j.x, y: j.y ?? 0, z: j.z }, String(j.tag ?? 'admin')); break // test: ask the halo for one movePlayerTo
+          case 'call': { // admin test control (c27m N1): post the call at the current lobby bubble (or x,z) without waiting for the lobby-start edge or the player estimate; the real trigger is unchanged
+            const bb = m.bubble
+            const x = Number.isFinite(j.x) ? Number(j.x) : bb?.x, z = Number.isFinite(j.z) ? Number(j.z) : bb?.z
+            if (x === undefined || z === undefined) return reply({ ok: false, error: 'no bubble and no x,z' }, 400)
+            callSeq++; callUntil = Date.now() + CONFIG.callSeconds * 1000; callAt = { x, y: bb?.y ?? 0, z, radius: bb?.radius ?? 10 }
+            return reply({ ok: true, seq: callSeq, seconds: CONFIG.callSeconds })
+          }
+          case 'broadcast': if (j.event && typeof j.event.ev === 'string') m.broadcast(j.event); break // admin test control (the showing): send one match event to every halo, as the real game would
           case 'drop': m.addDrop(j.kind ?? 'plume', { x: j.x, y: j.y ?? 0, z: j.z }); break
           case 'sim':
             if (sim) clearInterval(sim)

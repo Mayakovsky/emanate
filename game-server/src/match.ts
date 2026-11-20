@@ -88,12 +88,16 @@ export class Match {
     this.state = 'lobby'
     this.lobbyEndsAt = now + this.cfg.lobbySeconds * 1000
     this.bubble = { x: at.x, y: at.y, z: at.z, radius: this.cfg.bubbleRadius }
+    this.called.clear()
     this.synthSays.push('Everyone into the bubble!')
     this.note('lobby-start', { seconds: this.cfg.lobbySeconds })
     this.broadcast({ ev: 'lobby', seconds: this.cfg.lobbySeconds, x: at.x, y: at.y, z: at.z, radius: this.cfg.bubbleRadius })
   }
+  called = new Set<string>() // c27: wearers who joined through the call portal (they count as inside the bubble when the timer ends)
+  callJoin(pid: string) { if (this.state === 'lobby') this.called.add(pid) }
   insideBubble(p: Player): boolean {
     const b = this.bubble
+    if (b && this.called.has(p.id)) return true
     return !!b && Math.hypot(p.pos.x - b.x, p.pos.z - b.z) <= b.radius && Math.abs(p.pos.y - b.y) <= b.radius + 4
   }
   // the mode from the head count: 1 = Solo, 2 to 5 = Coop (a Charge needs min(3, group) transfers), 6 or more = Multiplayer (auto-balanced, at least 3 a side)
@@ -578,6 +582,7 @@ export class Match {
     this.synthTrapUntil = 0
     this.broadcast({ ev: 'round-start', round: this.round })
     if (this.cfg.tossStartRounds.includes(this.round) && this.round <= 2) this.broadcast({ ev: 'toss', round: this.round, altitude: this.cfg.tossAltitude })
+    if (this.cfg.blastStart && newRound && this.round === 1) this.broadcast({ ev: 'blast', centre: this.cfg.blastCentre, cx: this.synth.x, cz: this.synth.z, radius: this.cfg.blastRadius, seed: Math.floor(Math.random() * 4294967295) })
     this.note('round-start', { round: this.round })
   }
 

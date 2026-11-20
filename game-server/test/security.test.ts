@@ -265,7 +265,7 @@ test('c26 gate B: the bare check carries only the lobby and the bubble (no playe
     m.cfg = { ...m.cfg, lobbyEnabled: true } // the real server has the lobby on: a wearer not yet in the bubble only waits
     const bare = await (await fetch(url(port, '/halo/state?pv=1'))).json() as any
     assert.equal(bare.lobby, false); assert.equal(bare.bubble, null)
-    assert.deepEqual(Object.keys(bare).filter((k) => !['ok', 'idle', 'sv', 'lobby', 'bubble', 'refuse', 'message'].includes(k)), [])
+    assert.deepEqual(Object.keys(bare).filter((k) => !['ok', 'idle', 'sv', 'lobby', 'bubble', 'refuse', 'message', 'blasts', 'call'].includes(k)), [])
     // no lobby and not in a match: a tick is answered but carries no lease
     const r1 = await (await tick(port, T('0x' + 'a'.repeat(40)))).json() as any
     assert.equal(r1.lease, undefined)
@@ -278,5 +278,20 @@ test('c26 gate B: the bare check carries only the lobby and the bubble (no playe
     // a wearer far outside the bubble and not in the match gets none
     const far = { ...T('0x' + 'c'.repeat(40)), pos: { x: 500, y: 0, z: 500 } }
     assert.equal(((await (await tick(port, far)).json()) as any).lease, undefined)
+  })
+})
+
+test('c27: a launch is shown to every Halo for a few seconds (no id), the call goes out once per lobby when enough Halos check in, and a call join counts as inside the bubble', async () => {
+  await withServer({}, async (port, m: any) => {
+    const T0 = '0x' + 'b'.repeat(40)
+    const r0 = await (await tick(port, { ...T(T0), events: [{ ev: 'blast' }] })).json() as any
+    const bare = await (await fetch(url(port, '/halo/state?pv=1'))).json() as any
+    assert.equal(bare.blasts.length, 1); assert.deepEqual(Object.keys(bare.blasts[0]).sort(), ['age', 'x', 'y', 'z']); assert.ok(r0)
+    assert.equal(bare.call, null)
+    m.bubble = { x: 5, y: 0, z: 5, radius: 10 }; m.state = 'lobby'
+    m.upsertPlayer(T0, { name: 'x', pos: { x: 500, y: 0, z: 500 }, speed: 0 })
+    assert.equal(m.insideBubble(m.players.get(T0)), false)
+    m.callJoin(T0)
+    assert.equal(m.insideBubble(m.players.get(T0)), true)
   })
 })

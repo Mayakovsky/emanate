@@ -56,6 +56,7 @@ export const SLOTS: Slot[] = [
   S('halo.upgrade_pickup', 'Halo', 'An upgrade is picked up', '', 'Walking within 2 m of a drop', 'upgrade', 2),
   S('halo.boost_on', 'Halo', 'Halo boost starts (next power level, 30 s)', '', 'Using a Halo boost (key E)', 'upgrade', 2),
   S('halo.arrow_overload', 'Halo', 'The red arrow is overloaded inside 100 m: a sputter / failed animation', '', 'Key 1 within 100 m of the Synth', 'overload', 2),
+  S('blast.crack', 'Halo', 'The blast launch: a short lightning-style crack (Forces makes the file; placeholder = the crackle tone)', '', 'The game-start blast and the Ctrl+E re-throw', 'crackle', 1),
   S('halo.denied', 'Halo', 'A key press that does nothing (cooldown, nothing in range, no plumes)', '', 'Keys 1, 2, 4 refused', 'nokey', 1),
   S('halo.warnings_on', 'Halo', 'Dead-zone warnings switched on', '', 'Key 3', 'upgrade', 1),
   S('halo.warnings_off', 'Halo', 'Dead-zone warnings switched off', '', 'Key 3', 'nokey', 1),
