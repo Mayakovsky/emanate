@@ -123,8 +123,8 @@ test('the ending: PP2 in the winner colour, the Storm, then two replay portals s
   q = drain(m, 'a')
   assert.ok(q.some((e) => e.ev === 'storm' && e.seconds === 16))
   run(m, clock, 16, { a: { x: 500, z: 500 } })
-  assert.equal(m.state, 'ending') // c30d: replayOpenDelay (2 s) after the Storm
-  run(m, clock, 2, { a: { x: 500, z: 500 } })
+  assert.equal(m.state, 'ending') // c30d: replayOpenDelay (4 s) after the Storm
+  run(m, clock, 4, { a: { x: 500, z: 500 } })
   assert.equal(m.state, 'replay')
   const pub = m.replayPublic()!
   assert.ok(pub && pub.left > 0 && pub.left <= 10)
@@ -135,7 +135,7 @@ test('the ending: PP2 in the winner colour, the Storm, then two replay portals s
 
 function atReplay() {
   const { m, clock } = toEnding()
-  run(m, clock, 4 + 16 + 2, { a: { x: 9000, z: 9000 } }) // the player stands far away while the Storm plays
+  run(m, clock, 4 + 16 + 4, { a: { x: 9000, z: 9000 } }) // the player stands far away while the Storm plays
   return { m, clock, pub: m.replayPublic()! }
 }
 
@@ -170,7 +170,7 @@ function crowd(n: number, sides: ('hunters' | 'helpers')[]) {
   const ids = Array.from({ length: n }, (_, i) => 'p' + i)
   const far: Record<string, { x: number; z: number }> = { a: { x: 9000, z: 9000 } }
   for (const id of ids) { m.upsertPlayer(id, { pos: at(9000, 9000) }); far[id] = { x: 9000, z: 9000 } } // joined waiting (they tick in during the ending)
-  run(m, clock, 4 + 16 + 2, far)
+  run(m, clock, 4 + 16 + 4, far)
   const pub = m.replayPublic()!
   const pos: Record<string, { x: number; z: number }> = { a: { x: 9000, z: 9000 } }
   ids.forEach((id, i) => { const s = sides[i]; pos[id] = s === 'hunters' ? { x: pub.hunters.x, z: pub.hunters.z } : s === 'helpers' ? { x: pub.helpers.x, z: pub.helpers.z } : { x: pub.hunters.x + 6, z: pub.hunters.z + 20 } })
@@ -237,9 +237,9 @@ test('c30b: cineFx off: round 2 -> no Aurora; the ending -> PP2 then the replay 
   run(m, clock, 5, { a: { x: 500, z: 500 } })
   const names = drain(m, 'a').map((e) => e.ev)
   assert.ok(!names.includes('storm') && !names.includes('aurora'), names.join())
-  assert.equal(m.state, 'ending') // c30d: PP2 (4 s) + replayOpenDelay (2 s): not open at 5 s
-  run(m, clock, 2, { a: { x: 500, z: 500 } })
-  assert.equal(m.state, 'replay') // after PP2 and the 2 s delay, no 16 s Storm
+  assert.equal(m.state, 'ending') // c30d: PP2 (4 s) + replayOpenDelay (4 s): not open at 5 s
+  run(m, clock, 4, { a: { x: 500, z: 500 } })
+  assert.equal(m.state, 'replay') // after PP2 and the 4 s delay, no 16 s Storm
 })
 
 test('c30d: replayOpenDelay: PP2 stands until the replay portals open; 0 gives the old timing', () => {

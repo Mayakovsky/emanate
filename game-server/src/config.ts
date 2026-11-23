@@ -81,7 +81,7 @@ export const CONFIG = {
   glimpseSeconds: 7, // E12 stays this long in rounds 1 and 2
   glimpseSecondsLast: 4, // ... and this long in round 3 (the flying round)
   replaySeconds: 10, // the two replay portals stand this long
-  replayOpenDelay: 2, // c30d: s between PP2's end and the replay portals opening, so the Synth that went into PP2 is out of every viewer's sight first (Directive: Synth still drawn at replay-open)
+  replayOpenDelay: 4, // c30d (4 s approved by Desktop, mail 12e5c9f6): s between PP2's end and the replay portals opening, so the Synth that went into PP2 is out of every viewer's sight first (Directive: Synth still drawn at replay-open)
   autosortSeconds: 2, // in the last seconds the server sorts whoever has not picked a portal, to balance the teams
   replayMin: 0, // players needed in range at the end of the countdown; 0 = the mode rules (solo 1, coop 3, multiplayer 6 with at least 3 a side)
   replayRange: 60, // m from the portals: players this close count as "in range" at the end
