@@ -6,7 +6,7 @@
 import { RULES } from './logic'
 
 export const PROTOCOL_VERSION = 1 // the command vocabulary and settings schema this halo understands
-export const BUILD_ID = 'c27m' // the halo build (set at release; the server logs it and may refuse an old one)
+export const BUILD_ID = 'c30c' // the halo build (set at release; the server logs it and may refuse an old one)
 
 // ---- the powers (index.ts) ----
 export const POWER = {
@@ -28,9 +28,9 @@ export const FXS = {
 }
 // ---- c27: the blast (game start). The server sends the command; these are the Halo's defaults, all server-settable ----
 // radius: the planned landing is inside this many metres of the centre; gravity: the Halo's model of the fall (calibrated on the client); apexMin/apexMax: launch height range (m); maxFy/maxFh: force ceilings; vMax: highest horizontal speed planned; bounds: the map half-size the plan stays inside
-export const BLAST = { radius: 500, gravity: 10, riseGravity: 40, apexMin: 80, apexMax: 240, maxFy: 60, maxFh: 60, kv: 6, vMax: 110, bounds: 2400, scale: 1, hold: 1, flashSeconds: 0.25, flashStrength: 0.7, bubbleRadius: 110, bubbleSeconds: 2.5, bubbleHold: 3, bubbleImplode: 1, bubbleAlpha: 0.67, rethrowCooldown: 6, callCooldown: 120, callRange: 800, cannon: 1, steer: 60, steerK: 4, steerEase: 60, vyMax: 150, gain: 1, burst: 0.15, speed: 110, rangeA: 400, rangeK: 1, elevMin: 40, elevMax: 89 }
+export const BLAST = { radius: 500, gravity: 10, riseGravity: 40, apexMin: 80, apexMax: 240, maxFy: 60, maxFh: 60, kv: 6, vMax: 110, bounds: 2400, scale: 1, hold: 1, flashSeconds: 0.25, flashStrength: 0.7, bubbleRadius: 110, bubbleSeconds: 2.5, bubbleHold: 3, bubbleImplode: 1, bubbleAlpha: 0.75, rethrowCooldown: 6, callCooldown: 120, callRange: 800, cannon: 1, steer: 60, steerK: 4, steerEase: 60, vyMax: 150, gain: 1, burst: 0.15, speed: 110, rangeA: 400, rangeK: 1, elevMin: 40, elevMax: 89 }
 // ---- features: 1 on, 0 off ----
-export const FEATURES = { calls: 1, arrows: 1, plumes: 1, trap: 1, deadzoneWarn: 1, cinematics: 1, bubbleFx: 1, sounds: 1, debugPanel: 1, powers: 1, notes: 1, activeLine: 1, particles: 1, cues: 1 }
+export const FEATURES = { calls: 1, arrows: 1, plumes: 1, trap: 1, deadzoneWarn: 1, cinematics: 1, bubbleFx: 1, sounds: 1, debugPanel: 1, powers: 1, notes: 1, activeLine: 1, particles: 1, cues: 1, callNear: 0, blastBurst: 1 }
 // ---- text (HUD notes and the always-on line) ----
 export const TEXT: Record<string, string> = {
   activeLine: 'EMANATE halo active: sends your position to emanate.hiddenforces.net (see /privacy)',
@@ -48,16 +48,18 @@ export const TEXT: Record<string, string> = {
   cueLobby: 'Step into the glowing bubble around the Synth to join.',
   cueRound: 'Chase the Synth and run into it.' + String.fromCharCode(10) + 'Press 1 for an arrow to it when it is far. Press 4 for a red smoke plume. Press E to set a trap.',
   callPrompt: 'The Synth is calling.'+String.fromCharCode(10)+'Step into the red portal and hold E to join.',
-  cueEnding: 'Go to the marked spot on the ground. When enough players are there, the ending starts.'
+  cueEnding: 'Walk into a portal to pick your side.' + String.fromCharCode(10) + 'The game starts again when the countdown ends.'
 }
 // ---- which sound an event plays: event slot id -> another slot id, or "lib:<name>" for a tone of the library inside the zip; "" = silent ----
 export const SOUNDS: Record<string, string> = {}
 // ---- the channel ----
 // c26: ONE build flag. OFF while the Halo is still tested (the server-unreachable test mode keeps its Tier 1 and the test keys); it MUST be ON in the published build (blocking step on the final-build readiness list).
+/** c29 (Plan v2): the effect recipe overrides from the server: flat keys such as `E13.smoke.size` (see look.ts tweakFor); free-form like text/sounds, key under 40 chars, value under 200 */
+export const LOOK: Record<string, number | string> = {}
 export const FINAL_NO_TEST_POWERS = false
 export const TICK = { everySec: 0.25, idlePollSec: 60 }
 
-const SECTIONS: Record<string, Record<string, any>> = { power: POWER, rules: RULES, fx: FXS, blast: BLAST, features: FEATURES, text: TEXT, sounds: SOUNDS, tick: TICK }
+const SECTIONS: Record<string, Record<string, any>> = { power: POWER, rules: RULES, fx: FXS, blast: BLAST, features: FEATURES, text: TEXT, sounds: SOUNDS, tick: TICK, look: LOOK }
 // hard limits that keep the halo inside what Decentraland allows whatever the server says: [min, max]
 const LIMITS: Record<string, [number, number]> = {
   'power.walkSpeed': [1, 12], 'power.jogSpeed': [1, 30], 'power.runSpeed': [1, 30], 'power.jumpHeight': [0.2, 6], 'power.runJumpHeight': [0.2, 8], 'power.doubleJumpHeight': [0.2, 14],
@@ -79,12 +81,13 @@ export function applyRemote(o: any): number {
     const target = SECTIONS[sec]
     const src = o[sec]
     if (!target || !src || typeof src !== 'object') continue
-    const open = sec === 'text' || sec === 'sounds' // free-form maps: any new string key may be added
+    const open = sec === 'text' || sec === 'sounds' || sec === 'look' // free-form maps: any new key may be added
     for (const k of Object.keys(src)) {
       const v = src[k]
       if (!open && !(k in target)) continue
       if (open) {
         if (typeof v === 'string' && v.length <= 200 && k.length <= 40) { target[k] = v; n++ }
+        else if (sec === 'look' && typeof v === 'number' && Number.isFinite(v) && k.length <= 40) { target[k] = v; n++ }
         continue
       }
       const cur = target[k]
@@ -97,7 +100,7 @@ export function applyRemote(o: any): number {
   return n
 }
 /** The built-in defaults, for the server's test and for resetting. */
-export function snapshotDefaults() { return JSON.parse(JSON.stringify({ power: POWER, rules: RULES, fx: FXS, blast: BLAST, features: FEATURES, text: TEXT, sounds: SOUNDS, tick: TICK })) }
+export function snapshotDefaults() { return JSON.parse(JSON.stringify({ power: POWER, rules: RULES, fx: FXS, blast: BLAST, features: FEATURES, text: TEXT, sounds: SOUNDS, tick: TICK, look: LOOK })) }
 const DEFAULTS_AT_LOAD = snapshotDefaults()
 export function resetToDefaults() {
   for (const sec of Object.keys(SECTIONS)) {

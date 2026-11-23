@@ -39,7 +39,7 @@ import {
 } from '@dcl/sdk/ecs'
 import { Vector3, Color4 } from '@dcl/sdk/math'
 import { emit } from './net'
-import { gameInit, gameUpdate, gameTier, gamePlaceTrap, gameHud, gameCameraTest, hudOverlay, powersAllowed, blastActive, gateInfo } from './game'
+import { gameInit, gameUpdate, gameTier, gamePlaceTrap, gameHud, hudOverlay, powersAllowed, blastActive, gateInfo } from './game'
 import { idle } from './net'
 import ReactEcs, { UiEntity, Label, ReactEcsRenderer } from '@dcl/sdk/react-ecs'
 import { dialogUi } from './dialog'
@@ -188,8 +188,7 @@ function halo(dt: number) {
   }
   if (inputSystem.isTriggered(InputAction.IA_PRIMARY, PointerEventType.PET_DOWN)) {
     // E: place a Discharge Trap where you stand (one at a time). Halo boosts now apply the moment they are picked up, so E no longer uses an upgrade or cycles the tier.
-    if (inputSystem.isPressed(InputAction.IA_SECONDARY)) gameCameraTest() // F held + E: the camera tests
-    else gamePlaceTrap()
+    gamePlaceTrap() // (c30: the F + E camera tests are gone: no camera tricks any more)
   }
   {
     const want = gameTier(baseTier)

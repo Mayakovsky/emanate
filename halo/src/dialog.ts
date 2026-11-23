@@ -1,28 +1,26 @@
 // EMANATE round 8: the halo's dialogue UI (placeholder text, no AI): the Synth's pitch with its two buttons, the Dev Team message
-// (two buttons that both read "Sure, I'll help!"), the replay menu after the Ending, and the final-cinematic banner.
+// (two buttons that both read "Sure, I'll help!"), and a plain info panel. (c30: the replay menu is gone.)
 // The halo never learns which Dev Team button is which side: the server decides and records it secretly.
 import ReactEcs, { UiEntity, Label, Button } from '@dcl/sdk/react-ecs'
 import { Color4 } from '@dcl/sdk/math'
 
-export type DialogKind = 'none' | 'pitch' | 'doubts' | 'replay' | 'info'
+export type DialogKind = 'none' | 'pitch' | 'doubts' | 'info'
 export const dialog = {
   kind: 'none' as DialogKind,
   since: 0, // seconds on the halo clock when the current screen opened (drives the dissolve)
   now: 0,
   title: '',
   body: '',
-  replayCount: 0,
   info: '' as string,
   onPick: (_pick: string) => {}
 }
 
-export function openDialog(kind: DialogKind, now: number, onPick: (pick: string) => void, extra: { title?: string; body?: string; replayCount?: number } = {}) {
+export function openDialog(kind: DialogKind, now: number, onPick: (pick: string) => void, extra: { title?: string; body?: string } = {}) {
   dialog.kind = kind
   dialog.since = now
   dialog.onPick = onPick
   dialog.title = extra.title ?? ''
   dialog.body = extra.body ?? ''
-  dialog.replayCount = extra.replayCount ?? dialog.replayCount
 }
 export function closeDialog() {
   dialog.kind = 'none'
@@ -78,12 +76,6 @@ export function dialogUi() {
         )
       )
     }
-    case 'replay':
-      return panel(
-        dialog.title || 'THE ENDING IS OVER',
-        (dialog.body || 'Play again from the start, or replay a single Power Round.') + `\nReplayed rounds so far: ${dialog.replayCount} (three trigger the final cinematic)`,
-        [btn('Play again', 'again'), btn('Replay Round 1: Sprint', 'round:1'), btn('Replay Round 2: Jump', 'round:2'), btn('Replay Round 3: Fly', 'round:3')]
-      )
     case 'info':
       return panel(dialog.title || 'EMANATE', dialog.body, [])
     default:

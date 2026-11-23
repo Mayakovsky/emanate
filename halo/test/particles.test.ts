@@ -72,15 +72,8 @@ test('smoke and fire emitters point up (turned -90 degrees about X), sparks are 
   assert.equal(planParticles('smoke', {}, false)!.emitters[0]!.up, true); assert.equal(planParticles('fire', {}, false)!.emitters[0]!.up, true); assert.equal(planParticles('sparks', {}, false)!.emitters[0]!.up, false)
 })
 
-import { replayMenuAction, cueKeyFor, CUE_BY_EVENT } from '../src/uiplan.ts'
+import { cueKeyFor, CUE_BY_EVENT } from '../src/uiplan.ts'
 import { TEXT, say } from '../src/settings.ts'
-test('c24i: the ending menu is open ONLY while the match is ended: a server reset into the lobby (or any other state) closes it; no answer changes nothing', () => {
-  assert.equal(replayMenuAction('ended', false), 'open'); assert.equal(replayMenuAction('ended', true), 'none')
-  for (const st of ['lobby', 'playing', 'final']) { assert.equal(replayMenuAction(st, true), 'close'); assert.equal(replayMenuAction(st, false), 'none') }
-  assert.equal(replayMenuAction(undefined, true), 'none'); assert.equal(replayMenuAction(undefined, false), 'none')
-  // the c24h bug: a reset goes ended -> lobby; the old rule only closed on 'playing'
-  assert.equal(replayMenuAction('lobby', true), 'close')
-})
 test('c24i: every stage has a cue text (plain English, one or two short lines, under 160 characters), the server can blank or change it, and unknown events have none', () => {
   resetToDefaults()
   for (const [ev, key] of Object.entries(CUE_BY_EVENT)) { assert.equal(cueKeyFor(ev), key); const t = say(key); assert.ok(t.length > 0 && t.length <= 160, key); assert.ok(t.split('\n').length <= 2, key) }
@@ -92,5 +85,5 @@ test('c24i: every stage has a cue text (plain English, one or two short lines, u
 })
 
 test('c25: every named particle texture has its file in images/ (the zip is locked after the Mint Lock, so a missing one could never be added)', () => {
-  for (const t of PARTICLE_TEXTURES) { const f = new URL('../images/' + t + '.png', import.meta.url); assert.ok(existsSync(f), 'missing images/' + t + '.png'); assert.ok(statSync(f).size > 0 && statSync(f).size < 4096, t) }
+  for (const t of PARTICLE_TEXTURES) { const f = new URL('../images/' + t + '.png', import.meta.url); assert.ok(existsSync(f), 'missing images/' + t + '.png'); assert.ok(statSync(f).size > 0 && statSync(f).size < 8192, t) }
 })

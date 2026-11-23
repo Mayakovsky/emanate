@@ -29,8 +29,8 @@ export function setPaused(v: boolean) { if (optOut) return; paused = v }
 let leaseUntil = -1 // Halo clock: the server's grant on a valid tick reply (20 s at most) lets powers run until then
 export const LEASE_MAX = 20
 export const leaseValid = () => clock < leaseUntil
-export interface BareFx { blasts: { x: number; y: number; z: number; age: number }[]; call: { seq: number; x: number; y: number; z: number; radius: number; left: number; far: number } | null }
-export const bareFx: BareFx = { blasts: [], call: null } // c27: what the server shows every Halo without any player data: recent launches and the call
+export interface BareFx { trails: { x: number; y: number; z: number }[]; blasts: { x: number; y: number; z: number; age: number }[]; call: { seq: number; x: number; y: number; z: number; radius: number; left: number; far: number } | null; replay: { left: number; radius: number; hunters: { x: number; y: number; z: number }; helpers: { x: number; y: number; z: number } } | null }
+export const bareFx: BareFx = { trails: [], blasts: [], call: null, replay: null } // c27: what the server shows every Halo without any player data: recent launches and the call
 export const bare: { lobby: boolean; bubble: { x: number; y: number; z: number; radius: number } | null } = { lobby: false, bubble: null }
 export function grantConsent() { if (optOut) return; consent = true; log = []; out = [] }
 export function doOptOut() { optOut = true; consent = false; leaseUntil = -1; log = []; out = []; serverState = null }
@@ -71,8 +71,13 @@ function handleReply(j: any) {
   if (!j || typeof j !== 'object') return
   if (typeof j.sv === 'number') sv = j.sv
   if (typeof j.lease === 'number' && j.lease > 0 && consent && !optOut) leaseUntil = clock + Math.min(LEASE_MAX, j.lease) // c26: the grant is only taken after the wearer's own consent
+  if (Array.isArray(j.trails)) bareFx.trails = j.trails.slice(0, 12).filter((b: any) => b && [b.x, b.y, b.z].every((v: unknown) => typeof v === 'number' && Number.isFinite(v))).map((b: any) => ({ x: b.x, y: b.y, z: b.z })) // c29e: positions of players in the air after a blast (no name, no address)
   if (Array.isArray(j.blasts)) bareFx.blasts = j.blasts.slice(0, 30).filter((b: any) => b && [b.x, b.y, b.z, b.age].every((v: unknown) => typeof v === 'number' && Number.isFinite(v))).map((b: any) => ({ x: b.x, y: b.y, z: b.z, age: b.age }))
   if ('call' in j) { const c = j.call; bareFx.call = c && typeof c === 'object' && [c.seq, c.x, c.y, c.z, c.radius, c.left, c.far].every((v: unknown) => typeof v === 'number' && Number.isFinite(v)) ? { seq: c.seq, x: c.x, y: c.y, z: c.z, radius: Math.max(2, Math.min(60, c.radius)), left: Math.max(0, Math.min(300, c.left)), far: Math.max(10, Math.min(500, c.far)) } : null }
+  if ('replay' in j) { // c30: the two replay portals (hunters purple, helpers gold) while the ending's countdown runs: no player data, so a wearer who never joined sees them too
+    const r = j.replay, ok = (v: any) => v && [v.x, v.y, v.z].every((q: unknown) => typeof q === 'number' && Number.isFinite(q))
+    bareFx.replay = r && typeof r === 'object' && typeof r.left === 'number' && typeof r.radius === 'number' && ok(r.hunters) && ok(r.helpers) ? { left: Math.max(0, Math.min(120, r.left)), radius: Math.max(1, Math.min(30, r.radius)), hunters: { x: r.hunters.x, y: r.hunters.y, z: r.hunters.z }, helpers: { x: r.helpers.x, y: r.helpers.y, z: r.helpers.z } } : null
+  }
   if (typeof j.lobby === 'boolean') { bare.lobby = j.lobby; const b = j.bubble; bare.bubble = b && typeof b === 'object' && [b.x, b.y, b.z, b.radius].every((v: unknown) => typeof v === 'number' && Number.isFinite(v)) ? { x: b.x, y: b.y, z: b.z, radius: b.radius } : null }
   if (j.settings && typeof j.settings === 'object') { resetToDefaults(); settingsApplied = applyRemote(j.settings) } // the server sends its COMPLETE set of overrides when the halo's sv differs: start from the defaults, so a removed override falls back
   if (Array.isArray(j.cmds)) for (const c of j.cmds.slice(0, 40)) if (c && typeof c === 'object') cmdQueue.push(c)

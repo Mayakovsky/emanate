@@ -5,15 +5,18 @@ import { Vector3, Color4 } from '@dcl/sdk/math'
 import { getPlayer } from '@dcl/sdk/players'
 import { getUserData } from '~system/UserIdentity'
 import { BLAST } from './settings'
+import { lookFx, lookData, BlastBubble, Trail, outside } from './lookfx'
+import { BLAST_LOOK, planFlash, capsOf } from './look'
 import { planBlast, bubbleScale } from './blastplan'
 import { skyUpdate, skyText, skyStart } from './sky'
 import { openDialog, closeDialog, setDialogClock, dialog } from './dialog'
 import { planParticles } from './particleplan'
-import { ParticleFx, FxLib, playLib, FX_KINDS, Arrows, Plumes, ChargeArcs, DropMarkers, TrapMarkers, BubbleFx, RiftFx as BurstRiftFx, TestMarkers, EndgameFx, SkyDome, StandIn, RiftFx, AuroraFx, DistanceMarkers, CameraTests, MARKER_COLOR_NAMES, MARKER_DISTANCES, initSounds, playSlot, playSound, soundsUpdate, setRemoteAudio, audioStats, slotSource } from './fx'
+import { ParticleFx, playLib, Arrows, Plumes, ChargeArcs, DropMarkers, TrapMarkers, BubbleFx, TestMarkers, DistanceMarkers, MARKER_COLOR_NAMES, MARKER_DISTANCES, initSounds, playSlot, playSound, soundsUpdate, setRemoteAudio, audioStats, slotSource } from './fx'
 import { consent, optOut, paused, setPaused, leaseValid, bare, bareFx, grantConsent, doOptOut } from './net'
 import { idle, setIdle, refetchSettings, cmdQueue, settingsInfo, refusedNote, emit, netUpdate, sendGameEvent, serverState, serverUp, lastErr, netStatus, lastGameError, manifestUpdate, manifestInfo } from './net'
-import { replayMenuAction, cueKeyFor } from './uiplan'
-import { FXS, TICK, applyRemote, feature, say, PROTOCOL_VERSION, FINAL_NO_TEST_POWERS } from './settings'
+import { cueKeyFor } from './uiplan'
+import { FXS, TICK, LOOK, applyRemote, feature, say, PROTOCOL_VERSION, FINAL_NO_TEST_POWERS } from './settings'
+lookData.v = LOOK // c29: the server's `look` section is the effect recipe overrides
 import {
   ArrowChannel, PlumeBudget, Warnings, pressRed, pressPink, RULES, TEST_TARGETS, testMovingSynth, testDeadZoneDistance, dist, nearest, type Vec, type Target
 } from './logic'
@@ -25,7 +28,6 @@ const toWorld = (p: Vec): Vec => ({ x: p.x + ORIGIN.x, y: p.y, z: p.z + ORIGIN.z
 const toLocal = (p: Vec): Vec => ({ x: p.x - ORIGIN.x, y: p.y, z: p.z - ORIGIN.z })
 
 const arrows = new Arrows()
-const fxLib = new FxLib()
 let hudMsg: { text: string; until: number } | null = null // a HUD line the server asked for
 // (c27: the on-screen glider prompt is removed completely)
 let wasIdle = false
@@ -36,32 +38,18 @@ const plumes = new Plumes()
 const arcs = new ChargeArcs()
 const dropMarkers = new DropMarkers()
 let markers: TestMarkers | null = null
-const endgameFx = new EndgameFx()
-const skyDome = new SkyDome()
+const trail = new Trail()
+const otherTrails: Trail[] = [] // c29e: the trail behind every other launched player (positions from the server, no names)
 const markers4 = new DistanceMarkers()
-const standIn = new StandIn()
-let glimpse: { until: number; spot: Vec } | null = null // the round-timeout glimpse of where the Synth is hiding
 let restoredNote = ''
 let restoredUntil = 0
 let finalBanner = 0
-let testReplays = 0
 let idReady = false
-let serverReplayOpen = false
-const rift = new RiftFx()
 const particleFx = new ParticleFx()
-const aurora = new AuroraFx()
-let cine = 0 // 0 off, 1 the Rift, 2 the aurora, 3 Carrington (test mode: hold F + press 3; server mode: round ends)
-let cineStart = 0
-let cueRiftOpen = false
-let lastEndgameKey = ''
-let riftAt: Vec = { x: 0, y: 0, z: 0 }
 let frameMs = 16
 let frameMsSum = 0
 let frameMsN = 0
 let frameMsAvg = 0
-const camTests = new CameraTests()
-let egTest = 0 // 0 off, 1 containment, 2 escape (test mode: hold F + press 4)
-let egAnchor: Vec = { x: 0, y: 0, z: 0 } // where the endgame test effect stands: where the wearer was (plus 25 m ahead of the spawn heading) when it was triggered
 const warnings = new Warnings()
 const budget = new PlumeBudget()
 let clock = 0 // seconds since the halo loaded
@@ -76,8 +64,6 @@ let testTrap: { pos: Vec; exempt: boolean } | null = null // test mode: the one 
 let testTrapUntil = 0 // test mode: a trap hit keeps the player one level down until then
 const trapMarks = new TrapMarkers()
 const bubbleFx = new BubbleFx()
-const burstRift = new BurstRiftFx()
-let burstState: { t0: number; at: Vec; radius: number } | null = null // the bubble blowing (lobby end, or the Ctrl+2 test)
 let lobbyNote = ''
 let testDropsGone = new Map<string, number>() // test drop id -> time it can come back
 let testRoundStart = 0
@@ -249,11 +235,13 @@ function gateUpdate(dt: number, world: Vec) {
   if (optOut || consent) { joinHold = 0; return }
   const b = bare.bubble
   const inP = !!portal && Math.hypot(world.x - toWorld(portal.at).x, world.z - toWorld(portal.at).z) <= portal.radius
-  const inside = (!!b && Math.hypot(world.x - b.x, world.z - b.z) <= b.radius) || inP
+  const rp = bareFx.replay // c30: a wearer who never joined holds E inside a replay portal to join (a joined wearer needs nothing: standing in a portal is their pick)
+  const inRp = !!rp && [rp.hunters, rp.helpers].some((q) => Math.hypot(world.x - q.x, world.z - q.z) <= Math.max(3, rp.radius))
+  const inside = (!!b && Math.hypot(world.x - b.x, world.z - b.z) <= b.radius) || inP || inRp
   gateDbg = 'world ' + world.x.toFixed(0) + ',' + world.z.toFixed(0) + (b ? '  bubble ' + b.x.toFixed(0) + ',' + b.z.toFixed(0) + ' dist ' + Math.hypot(world.x - b.x, world.z - b.z).toFixed(0) + '/' + b.radius : '  no bubble') + '  E-hold ' + joinHold.toFixed(1) + (inside ? '  INSIDE' : '')
   if (inside && !wasInside) note(say('joinPrompt'))
   wasInside = inside
-  if (inside && e && !ctrl && !shift) { joinHold += dt; if (joinHold >= 1.5) { grantConsent(); if (inP) emit('joinCall', {}); joinHold = 0; note('You joined. Hold Ctrl + Shift + E to pause; hold it 3 seconds to leave.') } } else joinHold = 0
+  if (inside && e && !ctrl && !shift) { joinHold += dt; if (joinHold >= 1.5) { grantConsent(); if (inP || inRp) emit('joinCall', {}); joinHold = 0; note('You joined. Hold Ctrl + Shift + E to pause; hold it 3 seconds to leave.') } } else joinHold = 0
 }
 
 // ---- the per-frame update; me = the wearer's scene-local position ----
@@ -267,7 +255,7 @@ export function gameUpdate(dt: number, me: Vec, speed: number, airborne: boolean
     // the server's kill switch (or a refusal): nothing is drawn, nothing is forced, nothing is sent about the player
     if (!wasIdle) { wasIdle = true; hideAll(); emit('idle', { on: true }) }
     netUpdate(dt, { pid: myId, name: myName, pos: toWorld(me), local: me, speed, tier }) // only the bare wake-up poll runs while idle
-    if (!idle && !optOut && !paused) { bareFxUpdate(toWorld(me), me); blastLookUpdate() } else clearBareFx()
+    if (!idle && !optOut && !paused) { lookFx.update(clock, me); bareFxUpdate(toWorld(me), me); blastLookUpdate() } else clearBareFx() // c30: lookFx.update also here: the call portal's colour cycle and the replay portals' lifetimes run for a wearer who has not joined
     return
   }
   if (wasIdle) { wasIdle = false; emit('idle', { on: false }) }
@@ -345,27 +333,11 @@ export function gameUpdate(dt: number, me: Vec, speed: number, airborne: boolean
     emit('distance-markers', { placed: markers4.placed })
   }
   if (pressedKey(InputAction.IA_ACTION_4)) {
-    if (inputSystem.isPressed(InputAction.IA_SECONDARY) && mode === 'test') {
-      // F held + 2: toggle the sky-darkening dome prototype (night)
-      const on = skyDome.toggle()
-      emit('sky-dome', { on })
-      note(`sky dome ${on ? 'ON' : 'off'}`)
+    if (false) {
     } else keyPink(world)
   }
-  if (pressedKey(InputAction.IA_ACTION_5)) {
-    if (inputSystem.isPressed(InputAction.IA_SECONDARY) && mode === 'test') cineTrigger(world) // F held + 3: the cinematic prototypes (Rift, aurora)
-    else keyDeadZone()
-  }
-  if (pressedKey(InputAction.IA_ACTION_6)) {
-    if (inputSystem.isPressed(InputAction.IA_SECONDARY) && mode === 'test') {
-      // F held + 4: the endgame test: off -> containment (purple, ground) -> escape (yellow, high) -> off
-      egTest = (egTest + 1) % 3
-      if (egTest === 1) egAnchor = { x: world.x, y: world.y, z: world.z + 8 }
-      emit('endgame-test', { state: egTest })
-      note(egTest === 0 ? 'endgame test off' : egTest === 1 ? 'ENDGAME TEST: containment (purple portal)' : 'ENDGAME TEST: escape (yellow portal)')
-      if (egTest) playSlot(egTest === 1 ? 'end.portal.contain.line' : 'end.portal.escape.line')
-    } else keyPlume(world)
-  }
+  if (pressedKey(InputAction.IA_ACTION_5)) keyDeadZone()
+  if (pressedKey(InputAction.IA_ACTION_6)) keyPlume(world)
 
   // ---- warnings (automatic) ----
   const dz = mode === 'server' ? serverState?.deadzone ?? null : testDeadZoneDistance(world)
@@ -390,17 +362,6 @@ export function gameUpdate(dt: number, me: Vec, speed: number, airborne: boolean
     emit('warning', { kind: 'upgrade-nearby', id: up.id, dist: dist(world, up.pos) })
     note('WARNING: upgrade available')
   }
-  // endgame arrow (server): purple = containment, yellow = escape; automatic, repeats while the endgame is open
-  const eg = mode === 'server' ? serverState?.endgame : null
-  if (eg && !eg.resolved) {
-    const name = eg.kind === 'containment' ? 'purple' : 'yellow'
-    if (arrows.runs[name].ch.start(clock, 'warning') === 'started') {
-      arrows.runs[name].target = () => ({ x: eg.x, y: world.y, z: eg.z })
-      arrows.runs[name].mode = 'arrow'
-      emit('arrow', { kind: name, source: 'endgame', d: Math.hypot(eg.x - world.x, eg.z - world.z) })
-    }
-  }
-
   // ---- draw ----
   curMe = me
   // lead the avatar by a few frames of its own velocity so the chevrons cannot trail it at speed (the Build 03 dots flickered)
@@ -411,15 +372,23 @@ export function gameUpdate(dt: number, me: Vec, speed: number, airborne: boolean
   }
   prevMe = { x: me.x, y: me.y, z: me.z }
   arrows.update(dt, clock, { x: me.x + velSmooth.x * 0.05, y: me.y, z: me.z + velSmooth.z * 0.05 }) // arrows are drawn in scene-local space at the feet
-  fxLib.update(clock)
-  if (!feature('particles')) particleFx.clear(); else particleFx.update(clock)
+  lookFx.warm(clock)
+  lookFx.update(clock, me) // c30: also moves the following effects (the Aurora) with the wearer, switches windowed emitters, runs the PP3 colour cycle
+  if (!feature('particles')) { particleFx.clear(); lookFx.clear() } else particleFx.update(clock)
   syncPlumes(me)
   syncTraps(me, world)
   syncBubble(dt, me, world)
   liftGlideUpdate(dt, me, world, vy, airborne)
   blastUpdate(world, vy, airborne)
+  { // E13 trails: 2 emitters each, the FIRST thing to lose emitters when the Halo is over its cap (the blast bubble and the upgrade drops keep theirs)
+    trailRoom = Math.max(0, Math.floor((capsOf(lookData.v).emitters - lookFx.emitterCount - bubbleEmitters()) / 2))
+    const own = blastActive() && feature('particles') && trailRoom > 0
+    if (own) trailRoom--
+    trail.update(me, own)
+  }
   blastLookUpdate()
   bareFxUpdate(world, me)
+  otherTrailsUpdate(world)
   lastAirborne = airborne
   teleportCheck()
   dropMarkers.update(clock, world, drops.map((d) => ({ id: d.id!, pos: toLocal(d.pos) })).map((d) => ({ id: d.id, pos: d.pos })))
@@ -434,39 +403,10 @@ export function gameUpdate(dt: number, me: Vec, speed: number, airborne: boolean
       emit('charging', { d: sp ? dist(world, sp) : null, stage: mode === 'server' ? serverState?.synth?.stage : 'test' })
     }
   } else charging = false
-  // endgame fx: from the server's endgame point, or the test trigger at the fixed test Synth point
-  {
-    const eg2 = mode === 'server' && cine !== 3 ? serverState?.endgame : null
-    {
-      const k = eg2 ? 'srv:' + eg2.kind : egTest ? 'test:' + egTest : ''
-      if (k !== lastEndgameKey) {
-        lastEndgameKey = k
-        if (k) {
-          const kind = eg2 ? eg2.kind : egTest === 1 ? 'containment' : 'escape'
-          playSlot('end.plume.rise')
-          playSlot(kind === 'containment' ? 'end.portal.contain.open' : 'end.portal.escape.open')
-        }
-      }
-    }
-    try {
-      if (eg2) endgameFx.update(dt, clock, eg2.kind, toLocal({ x: eg2.x, y: 0, z: eg2.z }))
-      else if (egTest) endgameFx.update(dt, clock, egTest === 1 ? 'containment' : 'escape', toLocal(egAnchor))
-      else if (endgameFx.built) endgameFx.hide()
-    } catch (e) {
-      emit('error', { where: 'endgameFx', msg: String(e) })
-    }
-  }
-  try {
-    camTests.update(me, toLocal(testMovingSynth(testClock)), riftAt)
-    skyDome.update(me)
-    cineUpdate(dt, me)
-  } catch (e) {
-    emit('error', { where: 'skyDome', msg: String(e) })
-  }
+  frameUpdate(dt)
   manifestUpdate(dt, setRemoteAudio)
   setDialogClock(clock)
   dialogSync()
-  glimpseUpdate()
   soundsUpdate()
   skyUpdate(clock, mode === 'test')
 
@@ -608,18 +548,14 @@ function syncBubble(dt: number, me: Vec, world: Vec) {
     lobbyNote = `LOBBY: ${b.inside} inside, ${Math.ceil(b.leftMs / 1000)} s left${b.you ? ' (you are in)' : ' (step into the bubble)'}`
     shown = true
   }
-  if (burstState) {
-    const t = clock - burstState.t0
-    burstRift.update(dt, t, burstState.at)
-    bubbleFx.burst(clock, t, burstState.at, burstState.radius)
-    if (t > 2.6) { burstState = null; burstRift.hide(); bubbleFx.hide() }
-  } else if (!shown) bubbleFx.hide()
+  if (!shown) bubbleFx.hide()
 }
 
 // ---- trace reports: each goes to the console log and (with the server up) to the server's log ----
 function traceReport(what: string, data: Record<string, unknown>) {
   emit('trace', { what, ...data })
-  if (mode === 'server') sendGameEvent({ ev: 'trace', what, text: JSON.stringify(data).slice(0, 380) })
+  // Directive Y item 5: the trace upload is test-only diagnostics (the server's halo-probes file); the final build (FINAL_NO_TEST_POWERS on) never sends it
+  if (mode === 'server' && !FINAL_NO_TEST_POWERS) sendGameEvent({ ev: 'trace', what, text: JSON.stringify(data).slice(0, 380) })
   console.log('[halo] ' + what + ' ' + JSON.stringify(data))
 }
 
@@ -630,11 +566,11 @@ let bl: Blast | null = null
 let flashUntil = 0
 let lastBlastCmd: any = null
 let blastBub: { t0: number; at: Vec } | null = null // the wearer's own blast (the others are in bubs)
-interface Bub { e: Entity; e2: Entity; t0: number; at: Vec }
+interface Bub { b: BlastBubble; t0: number; at: Vec }
 const bubs: Bub[] = []
 const seenBlasts = new Set<string>()
 let lastCallSeq = 0, callCooldownUntil = 0
-let portal: { at: Vec; until: number; e: Entity; e2: Entity; radius: number } | null = null
+let portal: { at: Vec; until: number; radius: number } | null = null
 /** c27 (Directive M): the blast's look = a crack (slot blast.crack), one short white flash, and the red fiery bubble that grows from the launch point (67 % opaque, soft ease) and fades; nothing else */
 function blastLook(at: Vec) {
   playSlot('blast.crack')
@@ -642,30 +578,18 @@ function blastLook(at: Vec) {
   blastBub = { t0: clock, at: { ...at } }
   spawnBub(at, clock)
   emit('blast', {})
-  fxLib.spawn('smoke', at, clock, { size: Math.max(3, BLAST.bubbleRadius / 12), seconds: BLAST.bubbleSeconds + 3, height: BLAST.bubbleRadius, n: 24 })
+  if (feature('blastBurst')) lookFx.effect('E6', at, clock, { r: lastBubble?.radius }, undefined) // c30b: the burst is scaled to the bubble (R to 1.5 R in 1.5 s; the recipe clamps R to 15 m) // c29e: E6 (the lobby burst) plays with EVERY blast; two recipes, one trigger; the feature blastBurst switches the pairing off
+  lookFx.spawn(planFlash(lookData.v), at, clock) // the white glow flash (0.25 s)
 }
-function spawnBub(at: Vec, t0: number) {
-  const e = engine.addEntity()
-  Transform.create(e, { position: Vector3.create(at.x, at.y, at.z), scale: Vector3.create(0.1, 0.1, 0.1) })
-  MeshRenderer.setSphere(e)
-  Material.setPbrMaterial(e, { albedoColor: Color4.create(1, 0.18, 0.04, BLAST.bubbleAlpha), emissiveColor: Color4.create(1, 0.35, 0.05, 1), emissiveIntensity: 1.6, transparencyMode: MaterialTransparencyMode.MTM_ALPHA_BLEND, metallic: 0, roughness: 1 })
-  // a second sphere with a NEGATIVE scale shows the inside faces: the wearer, still inside while it grows, sees the red fire around them
-  const e2 = engine.addEntity()
-  Transform.create(e2, { position: Vector3.create(at.x, at.y, at.z), scale: Vector3.create(-0.1, 0.1, 0.1) })
-  MeshRenderer.setSphere(e2)
-  Material.setPbrMaterial(e2, { albedoColor: Color4.create(1, 0.18, 0.04, BLAST.bubbleAlpha), emissiveColor: Color4.create(1, 0.35, 0.05, 1), emissiveIntensity: 1.6, transparencyMode: MaterialTransparencyMode.MTM_ALPHA_BLEND, metallic: 0, roughness: 1 })
-  bubs.push({ e, e2, t0, at: { ...at } })
-}
+function spawnBub(at: Vec, t0: number) { bubs.push({ b: new BlastBubble(t0, at), t0, at: { ...at } }) }
 function blastLookUpdate() {
   const E = Math.max(0.2, BLAST.bubbleSeconds), H = Math.max(0, BLAST.bubbleHold), I = Math.max(0.2, BLAST.bubbleImplode)
   if (blastBub && clock - blastBub.t0 > E + H + I) blastBub = null
   for (let i = bubs.length - 1; i >= 0; i--) {
     const b = bubs[i]!
     const k = bubbleScale(clock - b.t0, E, H, I)
-    if (k <= 0 && clock - b.t0 > 0.1) { engine.removeEntity(b.e); engine.removeEntity(b.e2); bubs.splice(i, 1); continue }
-    const r = Math.max(0.05, BLAST.bubbleRadius * k)
-    Transform.getMutable(b.e).scale = Vector3.create(r * 2, r * 2, r * 2)
-    Transform.getMutable(b.e2).scale = Vector3.create(-r * 2, r * 2, r * 2)
+    if (k <= 0 && clock - b.t0 > 0.1) { b.b.destroy(); bubs.splice(i, 1); continue }
+    b.b.update(Math.max(0.05, BLAST_LOOK.radius * k), BLAST_LOOK.radius) // E13: fixed particle size, the emitter count follows the radius
   }
 }
 /** c27 (Directive N): what every Halo can see without sending anything: other wearers' blast bubbles (from the server's list of recent launches) and the call: a red portal near a far wearer, who answers by stepping in and holding E */
@@ -684,26 +608,37 @@ function bareFxUpdate(world: Vec, me: Vec) {
   if (c && feature('calls') && !consent && c.seq !== lastCallSeq && clock >= callCooldownUntil && !portal) {
     lastCallSeq = c.seq
     const far = Math.hypot(world.x - c.x, world.z - c.z)
-    if (far > c.far && far < BLAST.callRange * 20) { // only wearers outside the near zone; they get the portal 10 m ahead of them
+    if ((far > c.far || feature('callNear')) && far < BLAST.callRange * 20) { // callNear: a test flag (default off): show the portal to a wearer inside the near zone too // only wearers outside the near zone; they get the portal 10 m ahead of them
       callCooldownUntil = clock + BLAST.callCooldown
       const t = Transform.getOrNull(engine.PlayerEntity)
       const f = t ? Vector3.rotate(Vector3.Forward(), t.rotation) : Vector3.Forward()
       const at = { x: me.x + f.x * 10, y: me.y, z: me.z + f.z * 10 }
-      const mk = (neg: boolean) => { const e = engine.addEntity(); Transform.create(e, { position: Vector3.create(at.x, at.y + c.radius * 0.5, at.z), scale: Vector3.create((neg ? -1 : 1) * c.radius * 2, c.radius * 2, c.radius * 2) }); MeshRenderer.setSphere(e); Material.setPbrMaterial(e, { albedoColor: Color4.create(1, 0.18, 0.04, BLAST.bubbleAlpha), emissiveColor: Color4.create(1, 0.35, 0.05, 1), emissiveIntensity: 1.6, transparencyMode: MaterialTransparencyMode.MTM_ALPHA_BLEND, metallic: 0, roughness: 1 }); return e }
-      portal = { at, until: clock + Math.min(c.left, 60), e: mk(false), e2: mk(true), radius: c.radius }
-      fxLib.spawn('smoke', at, clock, { size: Math.max(2, c.radius / 3), seconds: 12, height: 40, n: 16 })
+      portal = { at, until: clock + Math.min(c.left, 60), radius: c.radius }
+      lookFx.effect('E14', at, clock, { seconds: Math.min(c.left, 60) }, 'call') // E14: the rift oval, a smoke column, red at 67 %
       note(say('callPrompt'))
     }
   }
-  if (portal) {
-    if (clock > portal.until || consent) { engine.removeEntity(portal.e); engine.removeEntity(portal.e2); portal = null }
-    else { const k = 1 + 0.03 * Math.sin(clock * 2); const r = portal.radius * 2 * k; Transform.getMutable(portal.e).scale = Vector3.create(r, r, r); Transform.getMutable(portal.e2).scale = Vector3.create(-r, r, r) }
-  }
+  if (portal && (clock > portal.until || consent)) { lookFx.remove('call'); portal = null }
+  // c30: the two replay portals (PP2: hunters dark purple, helpers golden), side by side, while the countdown runs
+  const rp = bareFx.replay
+  if (rp && feature('particles')) {
+    if (!lookFx.has('rp-h')) lookFx.effect('E11', toLocal(rp.hunters), clock, { seconds: rp.left + 1, winner: 'hunters' }, 'rp-h')
+    if (!lookFx.has('rp-g')) lookFx.effect('E11', toLocal(rp.helpers), clock, { seconds: rp.left + 1, winner: 'helpers' }, 'rp-g')
+  } else if (lookFx.has('rp-h') || lookFx.has('rp-g')) { lookFx.remove('rp-h'); lookFx.remove('rp-g') }
+}
+let trailRoom = 0
+const bubbleEmitters = () => bubs.reduce((a, b) => a + b.b.n, 0)
+outside.emitters = () => bubbleEmitters() + (trail.live ? 2 : 0) + otherTrails.reduce((a, t) => a + (t.live ? 2 : 0), 0)
+function otherTrailsUpdate(world: Vec) {
+  const live = feature('particles') ? bareFx.trails.filter((t) => Math.hypot(t.x - world.x, t.z - world.z) > 8).slice(0, trailRoom) : [] // my own trail is drawn locally
+  while (otherTrails.length < Math.min(12, live.length)) otherTrails.push(new Trail())
+  for (let i = 0; i < otherTrails.length; i++) { const t = live[i]; otherTrails[i]!.update(t ? toLocal(t) : { x: 0, y: -100, z: 0 }, !!t) }
 }
 function clearBareFx() {
-  for (const b of bubs) { engine.removeEntity(b.e); engine.removeEntity(b.e2) }
+  for (const b of bubs) b.b.destroy()
   bubs.length = 0
-  if (portal) { engine.removeEntity(portal.e); engine.removeEntity(portal.e2); portal = null }
+  lookFx.remove('call'); portal = null; lookFx.remove('rp-h'); lookFx.remove('rp-g')
+  for (const t of otherTrails) t.clear(); otherTrails.length = 0
 }
 export const blastActive = () => bl !== null
 function startBlast(c: any) {
@@ -738,6 +673,7 @@ function startBlast(c: any) {
 function blastEnd(why: string, world: Vec) {
   const s = bl; if (!s) return
   Physics.removeForceFromPlayer(BLAST_SOURCE); bl = null
+  emit('blast-end', {}) // c29e: tells the server the launch is over (it stops sending this player's trail position)
   traceReport('blast', { end: why, seed: s.seed, planned: s.land, landed: { x: +world.x.toFixed(1), y: +world.y.toFixed(1), z: +world.z.toFixed(1) }, errPlanned: +Math.hypot(world.x - s.land.x, world.z - s.land.z).toFixed(1), fromCentre: +Math.hypot(world.x - s.centre.x, world.z - s.centre.z).toFixed(1), apexReached: +(s.maxY - s.start.y).toFixed(1), apexPlanned: +s.apexPlanned.toFixed(1), flightSeconds: +(clock - s.t0).toFixed(1), flightPlanned: +s.flightPlanned.toFixed(1), vUp: +s.vUp.toFixed(1), vh: +s.vh.toFixed(1) })
 }
 function blastUpdate(world: Vec, vy: number, airborne: boolean) {
@@ -918,18 +854,16 @@ function handleServerEvent(ev: any) {
     case 'contact': contactFx = { pos: { x: ev.x, y: ev.y, z: ev.z }, until: clock + 1.5, stage: ev.stage === 'free' ? 'reset' : ev.stage }; break
     case 'warn5': playSlot('warn.five_minutes'); note('5 minutes left in the round'); break
     case 'round-start': cue('round-start'); budget.refill(); note(say('roundStart', { round: ev.round })); playSlot('round.start'); break
-    case 'round-complete': {
-      note(`round ${ev.round} complete (${ev.side})`)
-      const at = contactFx ? contactFx.pos : serverState?.synth ? { x: serverState.synth.x, y: serverState.synth.y, z: serverState.synth.z } : { x: 0, y: 0, z: 0 }
-      startCine(Math.min(3, ev.round), toLocal(at)) // round 1 -> Rift, round 2 -> aurora, round 3 -> Carrington -> endgame
-      break
-    }
+    case 'round-complete': note(`round ${ev.round} complete (${ev.side})`); break // c30: the cinematics are their own events (portal, strike, aurora, blast)
     case 'round-timeout':
-      note('TIME IS UP: this is where the Synth is hiding')
+      note('TIME IS UP: the Synth moves')
       playSlot('round.timeout')
-      startGlimpse({ x: ev.x, y: ev.y, z: ev.z }, ev.glimpseSeconds ?? 8)
-      break
-    case 'final-cinematic': startFinal(); break
+      break // c30: no glimpse camera, no stand-in figure
+    case 'portal': portalEvent(ev); if (ev.v === 2) cue('ending'); break
+    case 'strike': { const at = evPos(ev); if (at && feature('particles')) { lookFx.effect('E8', at, clock, { seconds: Math.max(0.5, Math.min(10, num2(ev.seconds, 2))) }, 'strike'); playSlot('cine.rift.strike') } break }
+    case 'aurora': if (feature('particles')) { lookFx.effect('E9', curMe, clock, { seconds: Math.max(1, Math.min(60, num2(ev.seconds, 20))) }, 'aurora'); playSlot('cine.aurora.ambient'); playSlot('cine.aurora.synth_change') } break // around THIS wearer; the effect follows them in flight
+    case 'storm': if (feature('particles')) { lookFx.effect('E10', curMe, clock, { seconds: Math.max(1, Math.min(60, num2(ev.seconds, 16))) }, 'storm'); playSlot('cine.carrington.storm') } break
+    case 'glimpse-signal': glimpseSignal(ev); break
     case 'restored':
       restoredNote = `restored from the server: round ${ev.round}, plumes ${ev.plumesLeft}`
       restoredUntil = clock + 15
@@ -939,129 +873,58 @@ function handleServerEvent(ev: any) {
     case 'stage': note(`Synth ${ev.stage} mode`); playSlot(ev.stage === 'repair' ? 'charge.repair' : ev.stage === 'upgrade' ? 'charge.upgrade' : 'charge.reset'); break
     case 'pickup': playSlot('halo.upgrade_pickup'); note(ev.kind === 'boost' ? 'Halo boost: 30 s (applied now)' : `picked up ${ev.kind}`); break
     case 'lobby': cue('lobby'); lobbyNote = `LOBBY: everyone into the bubble (${Math.round(ev.seconds)} s)`; note(say('lobbyCall')); playSlot('warn.upgrade'); break
-    case 'lobby-end': lobbyNote = ''; note(say('lobbyEnd', { mode: ev.mode, count: ev.count })); playSlot('cine.rift.strike'); if (lastBubble) { burstState = { t0: clock, at: lastBubble.at, radius: lastBubble.radius }; riftOpening(lastBubble.at) }; break
+    case 'lobby-end': lobbyNote = ''; note(say('lobbyEnd', { mode: ev.mode, count: ev.count })); break // c30: PP1 comes as its own event; the E6 burst plays with the blast
     case 'lobby-wait': lobbyNote = 'waiting for the next lobby'; note('the game started without you: you wait for the next lobby'); break
     case 'teleport': serverTeleport(ev); break
     case 'blast': runCommand({ ...ev, c: 'blast', mix: 1 }); break
     case 'toss': runCommand({ c: 'lift', altitude: Number(ev.altitude) || 100 }); traceReport('toss-event', { round: ev.round, altitude: ev.altitude }); break
     case 'trap-hit': playSlot('warn.upgrade'); note(ev.synth ? 'Discharge Trap hit the Synth' : 'Discharge Trap went off'); emit('trap-hit', { x: ev.x, z: ev.z, synth: ev.synth, players: ev.players }); break
-    case 'endgame': cue('endgame'); note(`endgame: ${ev.kind}`); break
     case 'double-agent': note('you were recruited as a double agent'); playSlot('role.double_agent'); break
   }
 }
 
-// hold F + E: cycle the camera test: off -> bird's-eye (250 m up) -> behind the moving test Synth point -> off
-export function gameCameraTest() {
-  const order = [0, 1, 2, 5]
-  const m = order[(order.indexOf(camTests.mode) + 1) % order.length] ?? 0
-  camTests.setMode(m)
-  emit('camera-test', { mode: m })
-  note(m === 0 ? 'camera test off' : m === 1 ? "CAMERA TEST: bird's-eye (250 m)" : m === 2 ? 'CAMERA TEST: behind the moving Synth point' : 'CAMERA TEST: far view from 180 m toward the markers (north)')
-}
-
-// hold F + 3: cycle the cinematic prototypes: off -> 1 The Rift -> 2 the aurora -> off
-function cineTrigger(world: Vec) {
-  cine = (cine + 1) % 4
-  cineStart = clock
-  emit('cinematic-test', { cine })
-  startCine(cine, toLocal(testMovingSynth(testClock)))
-}
-function startCine(c: number, at: Vec) {
-  if (!feature('cinematics') && c !== 0) return
-  cine = c
-  cineStart = clock
-  cueRiftOpen = false
-  if (cine === 1) {
-    riftAt = at
-    note('CINEMATIC 1: the Rift (strike, bird\'s-eye, glimpse, snap back)')
-    playSlot('cine.rift.strike')
-  } else if (cine === 2) {
-    if (!skyDome.on) skyDome.toggle()
-    note('CINEMATIC 2: night + aurora')
-    playSlot('cine.aurora.ambient')
-    playSlot('cine.aurora.synth_change')
-    frameMsSum = 0
-    frameMsN = 0
-  } else if (cine === 3) {
-    if (!skyDome.on) skyDome.toggle()
-    note('CINEMATIC 3: Carrington storm, then the endgame')
-    playSlot('cine.carrington.storm')
-  } else {
-    if (skyDome.on) skyDome.toggle()
-    note('cinematic off')
-  }
-}
-let world0: Vec = { x: 0, y: 0, z: 0 }
-function cineUpdate(dt: number, me: Vec) {
-  world0 = toWorld(me)
+/** frame time (the HUD's ms / fps line): the measure the 77-emitter peak test reads */
+function frameUpdate(dt: number) {
   frameMsSum += dt * 1000
   frameMsN++
   if (frameMsN >= 60) {
     frameMsAvg = frameMsSum / frameMsN
+    frameMsPeak = Math.max(frameMsPeak, frameMsAvg)
     frameMsSum = 0
     frameMsN = 0
   }
-  const t = clock - cineStart
-  if (cine === 1) {
-    rift.update(dt, t, riftAt)
-    if (!cueRiftOpen && t > 1.5) {
-      cueRiftOpen = true
-      playSlot('cine.rift.open')
-    }
-    // timeline: 0-3 s strike; 3 s bird's-eye above the rift; 9 s third-person glimpse; 15 s snap back
-    if (t > 3 && t < 9 && camTests.mode !== 3) camTests.setMode(3, riftAt)
-    if (t >= 9 && t < 15 && camTests.mode !== 4) camTests.setMode(4, riftAt)
-    if (t >= 15) {
-      playSlot('cine.rift.snap')
-      camTests.setMode(0)
-      cine = 0
-      rift.hide()
-      note('cinematic done: snapped back')
-    }
-  } else {
-    if (rift.built) rift.hide()
-  }
-  if (cine === 2 && t > 20) {
-    // the aurora lasts 20 s, then the night lifts
-    cine = 0
-    if (skyDome.on) skyDome.toggle()
-    aurora.hide()
-    note('aurora over')
-  }
-  if (cine === 2) aurora.update(clock, me)
-  else if (aurora.cols.length) aurora.hide()
-  // Cinematic 3: a storm on the night planes (flashes, strobing, crackle) for 12 s, then it hands off to the endgame plume and portal
-  if (cine === 3) {
-    const tt = t
-    const flash = tt < 12 ? (Math.sin(tt * 23) > 0.7 || Math.random() < 0.04 ? 1 : 0.05 + 0.1 * Math.abs(Math.sin(tt * 3))) : 0
-    skyDome.setFlash(flash)
-    if (tt < 12 && Math.random() < 0.05) playSlot('cine.carrington.crackle')
-    if (tt >= 12) {
-      skyDome.setFlash(0)
-      playSlot('cine.carrington.ignite')
-      if (skyDome.on) skyDome.toggle()
-      cine = 0
-      if (mode === 'test') {
-        egTest = 1
-        egAnchor = { x: world0.x, y: world0.y, z: world0.z + 8 }
-      }
-      note('storm over: the endgame')
-    }
-  } else skyDome.setFlash(0)
 }
-
+let frameMsPeak = 0
 export function gameDebug() {
-  return { cine, dome: skyDome.on, cam: camTests.mode, egTest, mode }
+  return { mode, emitters: lookFx.emitterCount, outside: outside.emitters(), frameMsAvg, frameMsPeak }
 }
 
+// ---------------- c30 (Directive V): the game sequence, drawn from the server's events ----------------
+// PP1 (E7) -> the Synth disappears into it -> [round 1: the Strike E8 | round 2: the Aurora E9 with the blast] -> Blast + Burst (E13 + E6, trails) -> the Glimpse Signal (E12) -> the round starts.
+// The ending: PP2 (E11) in the winner's colour -> the Storm (E10) -> two replay portals (PP2, one purple, one gold; bare state) -> the game blasts again.
+const num2 = (x: unknown, d: number) => (typeof x === 'number' && Number.isFinite(x) ? x : d)
+const evPos = (ev: any): Vec | null => (typeof ev.x === 'number' && typeof ev.z === 'number' && Number.isFinite(ev.x) && Number.isFinite(ev.z) ? toLocal({ x: ev.x, y: num2(ev.y, 0), z: ev.z }) : null)
+function portalEvent(ev: any) {
+  const at = evPos(ev); if (!at || !feature('particles')) return
+  const secs = Math.max(1, Math.min(60, num2(ev.seconds, 5)))
+  if (ev.v === 2) lookFx.effect('E11', at, clock, { seconds: secs, winner: ev.side === 'helpers' ? 'helpers' : 'hunters' }, 'pp2') // PP2 in the winner's colour
+  else lookFx.effect('E7', at, clock, { seconds: secs + 0.5 }, 'pp1') // PP1
+  playSlot('cine.rift.open')
+  note(ev.v === 2 ? 'the Synth is gone into the portal: ' + (ev.side === 'helpers' ? 'helpers win' : 'hunters win') : 'the Synth steps into the portal: the blast follows')
+}
+function glimpseSignal(ev: any) {
+  const at = evPos(ev); if (!at || !feature('particles')) return
+  lookFx.effect('E12', at, clock, { seconds: Math.max(1, Math.min(30, num2(ev.seconds, 7))) }, 'glimpse') // the Synth's NEW starting spot: a pale-cyan column to max height
+  playSlot('cine.rift.snap') // placeholder cue: Forces supplies the sound file; a spare slot until then
+  emit('glimpse-signal', { seconds: ev.seconds })
+}
 
-// ---------------- round 8: dialogue, replay menu, timeout glimpse, final cinematic ----------------
+// ---------------- round 8: the Synth's pitch dialogue (c30: the replay menu, the timeout glimpse and the final cinematic are gone) ----------------
 function toast(body: string, seconds = 4) {
   openDialog('info', clock, () => {}, { title: 'EMANATE (test)', body })
   toastUntil = clock + seconds
 }
 let toastUntil = 0
-let reopenReplayAt = 0
 
 function testPick(p: string) {
   if (p === 'help') {
@@ -1073,25 +936,11 @@ function testPick(p: string) {
     toast("You pressed 'Sure, I'll help!'. The server records which side that button was; the halo is not told.")
   }
 }
-function testReplayPick(p: string) {
-  testReplays++
-  closeDialog()
-  if (testReplays >= 3) {
-    testReplays = 0
-    startFinal()
-  } else {
-    toast(`Replay "${p}" started (test): ${testReplays} of 3 replayed rounds counted`, 3)
-    reopenReplayAt = clock + 4
-  }
-}
 function serverPick(p: string) {
   if (p === 'help' || p === 'doubts' || p === 'A' || p === 'B') {
     sendGameEvent({ ev: 'choice', pick: p })
     if (p === 'doubts') openDialog('doubts', clock, serverPick)
     else closeDialog()
-  } else {
-    sendGameEvent({ ev: 'replay', kind: p === 'again' ? 'again' : 'round', round: p.startsWith('round:') ? Number(p.slice(6)) : 1 })
-    closeDialog()
   }
 }
 function shiftKeys(pressed: (a: InputAction) => boolean) {
@@ -1100,18 +949,6 @@ function shiftKeys(pressed: (a: InputAction) => boolean) {
     openDialog('pitch', clock, testPick)
     emit('dialogue-test', {})
     note('DIALOGUE TEST: the Synth pitch')
-  }
-  if (pressed(InputAction.IA_ACTION_4)) {
-    // Shift + 2: the round timeout: the five-minute warning cue, then the glimpse of where the Synth is hiding, then it snaps back
-    note('ROUND TIMEOUT TEST: 5 minutes left (cue), then the glimpse')
-    playSlot('warn.five_minutes')
-    startGlimpse(testMovingSynth(testClock), 8)
-    emit('timeout-test', {})
-  }
-  if (pressed(InputAction.IA_ACTION_5)) {
-    // Shift + 3: the replay menu after the Ending (three replayed rounds trigger the final cinematic)
-    openDialog('replay', clock, testReplayPick, { replayCount: testReplays })
-    emit('replay-test', { count: testReplays })
   }
   if (pressed(InputAction.IA_ACTION_6)) {
     // Shift + 4: what a reloaded halo shows when the server hands its state back
@@ -1133,42 +970,11 @@ function dialogSync() {
     toastUntil = 0
     if (dialog.kind === 'info') closeDialog()
   }
-  if (reopenReplayAt > 0 && clock >= reopenReplayAt) {
-    reopenReplayAt = 0
-    if (dialog.kind === 'none') openDialog('replay', clock, testReplayPick, { replayCount: testReplays })
-  }
   if (mode !== 'server' || !serverState) return
   const st = serverState.you?.dialog
   if (st === 'pitch' && dialog.kind !== 'pitch') openDialog('pitch', clock, serverPick)
   else if (st === 'doubts' && dialog.kind !== 'doubts') openDialog('doubts', clock, serverPick)
   else if (st === 'done' && (dialog.kind === 'pitch' || dialog.kind === 'doubts')) closeDialog()
-  const ms = serverState.match?.state
-  const act = replayMenuAction(ms, dialog.kind === 'replay') // c24i: the menu closes in EVERY state but 'ended' (a server reset into 'lobby' used to leave it stuck)
-  if (act === 'open') openDialog('replay', clock, serverPick, { replayCount: serverState.match.replayCount ?? 0 })
-  else if (act === 'close') closeDialog()
-}
-function startGlimpse(spot: Vec, seconds: number) {
-  glimpse = { until: clock + seconds, spot }
-  riftAt = toLocal(spot)
-  camTests.setMode(4, riftAt)
-  emit('glimpse', { spot, seconds })
-}
-function glimpseUpdate() {
-  if (!glimpse) return
-  standIn.update(toLocal(glimpse.spot), clock)
-  if (clock >= glimpse.until) {
-    glimpse = null
-    camTests.setMode(0)
-    standIn.hide()
-    note('glimpse over: back to your avatar')
-  }
-}
-function startFinal() {
-  finalBanner = clock + 12
-  startCine(3, toLocal(testMovingSynth(testClock)))
-  openDialog('info', clock, () => {}, { title: 'THE FINAL CINEMATIC', body: 'Three replayed rounds. The sky ignites.' })
-  toastUntil = clock + 6
-  emit('final-cinematic', {})
 }
 
 
@@ -1186,19 +992,27 @@ function runCommand(c: Record<string, unknown>) {
       particleFx.spawn(plan, at2, clock)
       break
     }
-        case 'hud': { // { text, seconds }: a line on the screen
+        case 'look': { // c29 (Plan v2): { id:'E1'..'E14', x,y,z (world) | at:'me', seconds, seed, r, scale }: one effect from the recipe table (look.ts); the feature `particles` is the kill switch
+      if (!feature('particles') || typeof c.id !== 'string') break
+      let at3 = c.at === 'me' || c.x === undefined ? curMe : toLocal({ x: num(c.x, 0), y: num(c.y, 0), z: num(c.z, 0) })
+      if (typeof c.ahead === 'number') { const pt = Transform.getOrNull(engine.PlayerEntity); const fw = pt ? Vector3.rotate(Vector3.Forward(), pt.rotation) : Vector3.Forward(); const d = Math.max(0, Math.min(60, c.ahead)); at3 = { x: curMe.x + fw.x * d, y: curMe.y, z: curMe.z + fw.z * d } } // c29: `ahead` metres in front of the wearer (the way it faces)
+      try {
+        const okLook = lookFx.effect(c.id, at3, clock, { r: typeof c.r === 'number' ? c.r : undefined, seed: typeof c.seed === 'number' ? c.seed : undefined, seconds: typeof c.seconds === 'number' ? c.seconds : undefined, scale: typeof c.scale === 'number' ? c.scale : undefined })
+        note(`look ${c.id}: ${okLook ? 'placed' : 'refused'}, live emitters ${lookFx.emitterCount}, particles ${lookFx.particleCount}`)
+      } catch (e) { emit('error', { where: 'look', id: c.id, msg: String(e) }); note('look ' + c.id + ' ERROR: ' + String(e).slice(0, 90)) }
+      break
+    }
+    case 'clear': { // c29e: the STOP: every live effect in this Halo goes at once (look effects, particles, the trails, the blast bubbles)
+      lookFx.clear(); trail.clear(); particleFx.clear(); clearBareFx(); hudMsg = null
+      break
+    }
+    case 'hud': { // { text, seconds }: a line on the screen
       const text = typeof c.text === 'string' ? c.text.slice(0, 160) : ''
       hudMsg = text ? { text, until: clock + Math.max(0.5, Math.min(60, num(c.seconds, 5))) } : null
       break
     }
     case 'sound': { // { id }: a slot id of the audio list, or lib:<name>
       if (typeof c.id === 'string' && c.id.length <= 60) playSlot(c.id)
-      break
-    }
-    case 'fx': { // { kind, x,y,z (world) | at:'me', size, seconds, color, n, height, heading }
-      if (typeof c.kind !== 'string') break
-      const at = c.at === 'me' || c.x === undefined ? curMe : toLocal({ x: num(c.x, 0), y: num(c.y, 0), z: num(c.z, 0) })
-      fxLib.spawn(c.kind, at, clock, { size: num(c.size, 3), seconds: num(c.seconds, 3), color: c.color, n: num(c.n, 12), height: num(c.height, 20), heading: num(c.heading, 0) })
       break
     }
     case 'push': { // { x,y,z, seconds }: a force on the wearer for a while (c27: only joined + leased + a running match; the c26 clamps are gone: sanity limits only, the original -40..40 / -40..60, 0.1..10 s)
@@ -1218,27 +1032,15 @@ function runCommand(c: Record<string, unknown>) {
     default: break // unknown: ignored
   }
 }
-function riftOpening(at: Vec) {
-  // the Rift opening as its own effect: the lobby bubble's centre
-  fxLib.spawn('portal', at, clock, { size: 5, seconds: 10, height: 18, color: 'red' })
-  fxLib.spawn('smoke', { x: at.x, y: at.y, z: at.z + 5 }, clock, { size: 5, seconds: 10, height: 200, n: 30 })
-}
 function hideAll() {
   for (const k of Object.keys(arrows.runs) as (keyof typeof arrows.runs)[]) arrows.runs[k].target = null
   arrows.update(0, clock, curMe)
   plumes.keepOnly(new Set())
-  fxLib.clear()
+  lookFx.clear(); trail.clear()
   particleFx.clear()
   trapMarks.update(clock, [])
   dropMarkers.update(clock, toWorld(curMe), [])
   bubbleFx.hide()
-  burstRift.hide()
-  burstState = null
-  if (endgameFx.built) endgameFx.hide()
-  if (skyDome.on) skyDome.toggle()
-  camTests.setMode(0)
-  standIn.hide()
-  rift.hide()
   closeDialog()
   Physics.removeForceFromPlayer(PUSH_SOURCE)
   hudMsg = null

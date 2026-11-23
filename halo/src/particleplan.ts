@@ -18,7 +18,7 @@ export const PCAP = {
   speed: 40, // m/s
   spread: 60 // cone half-angle, degrees
 }
-export const PARTICLE_TEXTURES = ['puff', 'wisp', 'flame', 'spark', 'ring', 'flipbook'] as const // the files images/<name>.png inside the zip: the only textures a wearable can have
+export const PARTICLE_TEXTURES = ['puff', 'wisp', 'flame', 'spark', 'ring', 'flipbook', 'glow', 'crackle'] as const // the files images/<name>.png inside the zip: the only textures a wearable can have
 export type RGBA = [number, number, number, number]
 export interface Emitter {
   dx: number; dy: number; dz: number // offset from the command's position
