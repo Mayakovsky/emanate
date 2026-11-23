@@ -146,13 +146,14 @@ export class Match {
     this.state = 'ending'
     this.endgame = null
     const storm = this.cfg.cineFx ? this.cfg.stormSeconds : 0 // c30b (Directive W): the Storm (E10) is off by default: PP2, the Synth goes in, then straight to the replay portals
-    const total = this.cfg.portalSeconds + storm + 1
+    const delay = Math.max(0, Math.min(10, Number(this.cfg.replayOpenDelay) || 0)) // c30d: the replay portals wait this long after PP2
+    const total = this.cfg.portalSeconds + storm + delay + 1 // PP2 stands until the replay portals open
     const at = this.portalAtSynth(2, { side: winner, seconds: total })
     this.note('ending', { winner })
     this.after(this.cfg.portalSeconds * 1000, () => {
-      if (!storm) { this.openReplay(at); return }
+      if (!storm) { this.after(delay * 1000, () => this.openReplay(at)); return }
       this.broadcast({ ev: 'storm', seconds: this.cfg.stormSeconds })
-      this.after(this.cfg.stormSeconds * 1000, () => this.openReplay(at))
+      this.after((this.cfg.stormSeconds + delay) * 1000, () => this.openReplay(at))
     })
   }
   private openReplay(at: Vec) {
