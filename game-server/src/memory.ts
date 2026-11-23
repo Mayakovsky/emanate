@@ -1,8 +1,8 @@
 // The Synth's memory, in tiers (design v3, "Memory (tiered, small footprint)"). Local file only; no internet (IP) addresses are tracked.
 //   players               whether and when they played, how it went, and which side they played last round
-//   talked                anyone who talked to the Synth: a timestamp and a one-line summary
-//   dismissed             anyone who dismissed it: a day-off timer
-//   everyone else         nothing: treated as a Stranger
+//   talked                a player (joined through the Halo) who talked to the Synth: a timestamp and a one-line summary
+//   dismissed             a player who dismissed it: a day-off timer
+//   everyone else         nothing is stored (c31): it may answer in the moment; treated as a Stranger
 import fs from 'node:fs'
 import path from 'node:path'
 
@@ -35,17 +35,32 @@ export class Memory {
     this.d.players[this.key(addr)] = { lastPlayed: now, lastSide: side, outcome }
     this.save()
   }
-  recordTalk(addr: string, summary: string, now: number) {
+  // c31 (privacy): the Synth keeps memory ONLY for players who joined through the Halo (they have a `players` entry). For anyone else it may
+  // answer in the moment, but nothing about them is stored (no talk line, no day-off on disk); the in-RAM cooldown in roaming.ts still lets it back off.
+  isJoined(addr: string): boolean { return this.key(addr) in this.d.players }
+  recordTalk(addr: string, summary: string, now: number): boolean {
+    if (!this.isJoined(addr)) return false
     this.d.talked[this.key(addr)] = { ts: now, summary: summary.slice(0, 120) } // one line
     this.save()
+    return true
   }
-  dismiss(addr: string, now: number, hours: number) {
+  dismiss(addr: string, now: number, hours: number): boolean {
+    if (!this.isJoined(addr)) return false
     this.d.dismissed[this.key(addr)] = { until: now + hours * 3600 * 1000 }
     this.save()
+    return true
   }
   isDayOff(addr: string, now: number): boolean {
     const x = this.d.dismissed[this.key(addr)]
     return !!x && now < x.until
+  }
+  // c31: deletes every stored record (talk, day-off) of an address that never joined; returns how many it removed. The caller makes the rollback copy first.
+  dropNonJoined(): number {
+    let n = 0
+    for (const k of Object.keys(this.d.talked)) if (!(k in this.d.players)) { delete this.d.talked[k]; n++ }
+    for (const k of Object.keys(this.d.dismissed)) if (!(k in this.d.players)) { delete this.d.dismissed[k]; n++ }
+    if (n) this.save()
+    return n
   }
   // a Former Helper gets a warm greeting, a former Hunter a teasing one; everyone else is a Stranger
   familiarity(addr: string): Familiarity {

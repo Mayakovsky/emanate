@@ -5,8 +5,8 @@
 //   idle      the kill switch: the halo stops sending about the player and shows nothing; it polls GET /halo/state to learn when to wake
 //   policy    refuse (or serve older behaviour to) a halo whose protocol version is below minPv
 export const SERVER_PROTOCOL = 1
-const SECTIONS = new Set(['power', 'rules', 'fx', 'blast', 'features', 'text', 'sounds', 'tick'])
-const COMMANDS = new Set(['hud', 'sound', 'fx', 'push', 'lift', 'teleport', 'blast', 'tick', 'feature', 'idle', 'settings', 'particles'])
+const SECTIONS = new Set(['power', 'rules', 'fx', 'blast', 'features', 'text', 'sounds', 'tick', 'look']) // c29: `look` = the recipe numbers of the effects (flat keys such as E13.smoke.size; key under 40 chars, value under 200)
+const COMMANDS = new Set(['hud', 'sound', 'fx', 'push', 'lift', 'teleport', 'blast', 'tick', 'feature', 'idle', 'settings', 'particles', 'look', 'clear'])
 const MAX_QUEUE = 40
 
 export interface HaloPolicy { minPv: number; message: string }
@@ -36,6 +36,8 @@ export class HaloControl {
     return n
   }
   reset() { this.overrides = {}; this.sv++ }
+  /** c29e (the real STOP): drop every queued command for everyone (the queues hold up to 40 per wearer); returns how many were dropped */
+  clearQueues(): number { let n = 0; for (const q of this.queues.values()) n += q.length; this.queues.clear(); return n }
   /** Validate and queue a command for one wearer (an address) or everyone ('all'). */
   command(to: string, cmd: any): boolean {
     if (!cmd || typeof cmd !== 'object' || typeof cmd.c !== 'string' || !COMMANDS.has(cmd.c)) return false
@@ -43,6 +45,11 @@ export class HaloControl {
     if (cmd.c === 'particles') { // c24f candidate: refuse what the halo would only ignore (an unknown kind, a non-numeric number); the halo clamps the rest
       if (!['fire', 'smoke', 'sparks'].includes(cmd.kind)) return false
       for (const k of ['x', 'y', 'z', 'size', 'seconds', 'height', 'n', 'width']) if (cmd[k] !== undefined && !(typeof cmd[k] === 'number' && Number.isFinite(cmd[k]))) return false
+    }
+    if (cmd.c === 'look') { // c29 (Plan v2): { c:'look', id:'E1'..'E14', x,y,z (world) | at:'me', seconds, seed, color:[r,g,b], r }: one effect from the recipe table; the halo validates and caps it
+      if (typeof cmd.id !== 'string' || !/^(E(1[0-4]|[1-9])|PLUME|PORTAL)$/.test(cmd.id)) return false // c30c: the two archetypes too
+      for (const k of ['x', 'y', 'z', 'seconds', 'seed', 'r', 'scale', 'v', 'far']) if (cmd[k] !== undefined && !(typeof cmd[k] === 'number' && Number.isFinite(cmd[k]))) return false
+      if (cmd.winner !== undefined && cmd.winner !== 'hunters' && cmd.winner !== 'helpers') return false // c30: PP2's colour
     }
     if (JSON.stringify(clean).length > 600) return false
     const targets = to === 'all' ? [...this.sawPlayers] : [to.toLowerCase()]

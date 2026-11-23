@@ -35,6 +35,7 @@ const ROOT = path.join(import.meta.dirname, '..')
 // c27: what every Halo may see without any player data: the launches of the last few seconds (so the blast bubble is drawn for everyone in range) and the call
 const bareChecks: number[] = []
 const blastLog: { x: number; y: number; z: number; at: number }[] = []
+const airborne = new Map<string, { x: number; y: number; z: number; at: number; since: number }>() // c29e: players in the air after a blast: the last position only, keyed by an id that is never published
 let callSeq = 0, callUntil = 0, callAt = { x: 0, y: 0, z: 0, radius: 10 }, lastLobbyBubble = false
 const CHECKS_PER_MIN = 20 // a Halo outside the game checks every 3 s
 const LOGDIR = path.join(ROOT, 'logs')
@@ -69,7 +70,7 @@ export function makeMatch(mode: Mode = 'solo') {
     now: Date.now,
     rng: Math.random,
     deadZones,
-    cfg: { ...CONFIG, completeFreezeSeconds: Number(process.env.EMANATE_FREEZE ?? 2), teleportStart: process.env.EMANATE_TELEPORT_START === 'on', blastStart: process.env.EMANATE_BLAST_START === 'on', blastCentre: process.env.EMANATE_BLAST_CENTRE === 'synth' ? 'synth' : 'self', lobbyEnabled: process.env.EMANATE_LOBBY === 'on', lobbySeconds: Number(process.env.EMANATE_LOBBY_SECONDS ?? CONFIG.lobbySeconds), tossStartRounds: (process.env.EMANATE_TOSS_ROUNDS ?? '').split(',').map(Number).filter((n) => n === 1 || n === 2) }, // the Synth freezes for a moment after a completed Charge, then is teleported
+    cfg: { ...CONFIG, completeFreezeSeconds: Number(process.env.EMANATE_FREEZE ?? 2), teleportStart: process.env.EMANATE_TELEPORT_START === 'on', blastStart: process.env.EMANATE_BLAST_START === 'on', blastCentre: process.env.EMANATE_BLAST_CENTRE === 'synth' ? 'synth' : 'self', lobbyEnabled: process.env.EMANATE_LOBBY === 'on', cinematics: process.env.EMANATE_CINEMATICS !== 'off', lobbySeconds: Number(process.env.EMANATE_LOBBY_SECONDS ?? CONFIG.lobbySeconds), tossStartRounds: (process.env.EMANATE_TOSS_ROUNDS ?? '').split(',').map(Number).filter((n) => n === 1 || n === 2) }, // the Synth freezes for a moment after a completed Charge, then is teleported
     emptyParcelFinder: (x, z) => nearestEmptyParcel(empty, x, z)?.center ?? null
   })
   m.setMode(mode)
@@ -98,7 +99,9 @@ const MAX_PLAYERS = Number(process.env.EMANATE_MAX_PLAYERS ?? 64)
     const now = Date.now()
     const blasts = blastLog.filter((b) => now - b.at < 9000).slice(-30).map((b) => ({ x: +b.x.toFixed(1), y: +b.y.toFixed(1), z: +b.z.toFixed(1), age: +((now - b.at) / 1000).toFixed(1) }))
     const call = CONFIG.callsEnabled && now < callUntil ? { seq: callSeq, x: callAt.x, y: callAt.y, z: callAt.z, radius: callAt.radius, left: Math.round((callUntil - now) / 1000), far: CONFIG.callMinFarMetres } : null
-    return { blasts, call }
+    const trails = [...airborne.values()].filter((a) => now - a.at < 1500 && now - a.since < 60000).slice(0, 12).map((a) => ({ x: +a.x.toFixed(1), y: +a.y.toFixed(1), z: +a.z.toFixed(1) })) // positions only: no name, no address
+    const replay = m.replayPublic() // c30: the two replay portals, for every halo (a wearer who never joined sees them too and joins by holding E in one)
+    return { blasts, call, trails, replay }
   }
   setInterval(() => { // c27: a lobby start is the player asking the Synth to play; if enough Halos are about, the call goes out (once per lobby)
     const has = !!m.bubble
@@ -178,6 +181,7 @@ const MAX_PLAYERS = Number(process.env.EMANATE_MAX_PLAYERS ?? 64)
           if (mine >= MAX_PIDS_PER_IP) return reply({ ok: false, error: 'too many players from this address' }, 429)
         }
         pidIp.set(t.pid, ip)
+        { const a = airborne.get(t.pid); if (a) { if (Date.now() - a.since > 60000) airborne.delete(t.pid); else { a.x = t.pos.x; a.y = t.pos.y; a.z = t.pos.z; a.at = Date.now() } } } // while in the air after a blast the position is kept fresh (until the halo says it landed, 60 s at most)
         log({ url, ua: 'halo', pid: t.pid, pos: t.pos, events: t.events })
         // the side is the server's to decide once the choice dialogue is on: a client-supplied side is only honoured in the old test mode
         pulse.claim(t.pid, t.pos, t.speed) // log-only cross-check against what the Synth sees over Pulse
@@ -185,6 +189,8 @@ const MAX_PLAYERS = Number(process.env.EMANATE_MAX_PLAYERS ?? 64)
         for (const e of t.events) {
           if (e.ev === 'plume') m.plume(t.pid, t.pos)
           if (e.ev === 'trace') { try { fs.appendFileSync(path.join(LOGDIR, 'halo-probes.jsonl'), JSON.stringify({ t: new Date().toISOString(), pid: t.pid.slice(0, 10), what: e.what, text: e.text }) + String.fromCharCode(10)) } catch {} }
+          if (e.ev === 'blast-end') airborne.delete(t.pid)
+          if (e.ev === 'blast') airborne.set(t.pid, { x: t.pos.x, y: t.pos.y, z: t.pos.z, at: Date.now(), since: Date.now() })
           if (e.ev === 'blast') { blastLog.push({ x: t.pos.x, y: t.pos.y, z: t.pos.z, at: Date.now() }); while (blastLog.length > 60) blastLog.shift() }
           if (e.ev === 'joinCall') m.callJoin(t.pid)
           if (e.ev === 'trap') m.placeTrap(t.pid, t.pos) // E: the Discharge Trap, placed where the player stands
@@ -241,7 +247,7 @@ const MAX_PLAYERS = Number(process.env.EMANATE_MAX_PLAYERS ?? 64)
       }
       if (url === '/pulsecheck') return reply({ on: pulseOn, cfg: pulse.cfg, stats: pulse.stats(), flagged: pulse.rows.filter((r) => r.flagged).slice(-40), recent: pulse.rows.slice(-20) })
       if (url === '/synthbrain') return reply({ flights: brain.flightLog.slice(-30), state: brain.state, insideBuilt: brain.insideBuilt, exposure: m.synthExposure, cfg: brain.cfg, trace: brainTrace.slice(-200), nav: navLog.slice(-300), glideLog: brain.glideLog.slice(-100), fleeLog: brain.fleeLog.slice(-60), navSpots: brain.navSpots.length, navAgeMs: Date.now() - brain.navAt, navFrom: brain.navFrom, navUse: brain.navUse })
-      if (url === '/roam') return reply({ on: roamOn, state: roam.state, target: roam.target?.addr ?? null, whispers: roam.whispers, chats: roam.chats, memory: memory.counts(), spots: [...spots, ...injectedSpots], events, people, log: roam.log.slice(-40) })
+      if (url === '/roam') return reply({ on: roamOn, state: roam.state, target: roam.target && memory.isJoined(roam.target.addr) ? roam.target.addr : null, whispers: roam.whispers, chats: roam.chats, memory: memory.counts(), spots: [...spots, ...injectedSpots], events, people, log: roam.log.slice(-40) })
       if (url === '/state') return reply({ match: { mode: m.mode, synthLevel: m.synthLevel, round: m.round, state: m.state, wins: m.wins, timeLeft: m.timeLeft(), synth: m.synth, charge: { stage: m.charge.stage }, players: [...m.players.values()].map((p) => ({ id: p.id, side: p.side, pos: p.pos, plumesLeft: p.plumesLeft })), drops: m.drops, plumes: m.plumes, endgame: m.endgame }, synthSource, bridge: bridge ? { lastSeenMsAgo: bridge.lastSeen ? Date.now() - bridge.lastSeen : null, syncs: bridge.syncs, rejected: bridge.rejected, pending: bridge.pending() } : null, unconfirmed: UNCONFIRMED, log: m.log.slice(-40) })
       if (url === '/admin' && req.method === 'POST') {
         switch (j?.cmd) {
@@ -253,6 +259,7 @@ const MAX_PLAYERS = Number(process.env.EMANATE_MAX_PLAYERS ?? 64)
           case 'spots': injectedSpots = (j.spots ?? []).map((x: any) => ({ x: x.x, z: x.z, count: x.count ?? 3, source: 'admin' })); break // test: Zone's stats service has nobody on it
           case 'events': injectedEvents = (j.events ?? []).length ? (j.events as any[]).map((x: any) => ({ x: x.x, z: x.z })) : null; break
           case 'brain-config': Object.assign(brain.cfg, j.config ?? {}); brain.reset(); break
+          case 'purge-nonjoined': return reply({ ok: true, removed: purgeNonJoined(), memory: memory.counts() })
           case 'forget': { // round 22: delete one address everywhere the server keeps it (memory, probe file, the live match); the answer says what was removed
             const a = String(j.addr ?? '').toLowerCase()
             if (!/^0x[0-9a-f]{40}$/.test(a)) return reply({ ok: false, error: 'address' }, 400)
@@ -267,12 +274,17 @@ const MAX_PLAYERS = Number(process.env.EMANATE_MAX_PLAYERS ?? 64)
           }
           case 'rift-config': riftCfg = { ...riftCfg, ...(typeof j.walkMs === 'number' ? { walkMs: j.walkMs } : {}), ...(typeof j.offset === 'number' ? { offset: j.offset } : {}) }; return reply({ ok: true, riftCfg }) // test control: slow the Synth's walk into the Rift (walkMs) or move the oval (offset); {} resets nothing: send the defaults back
           case 'halo-cmd': return reply({ ok: halo.command(String(j.to ?? 'all'), j.command), queued: true }) // a command for one wearer's address or 'all'
+          case 'halo-clear': { const n = halo.clearQueues(); airborne.clear(); halo.command('all', { c: 'clear' }); return reply({ ok: true, dropped: n }) } // c29e: the STOP: drop every queued halo command, then queue one `clear` for every wearer (it is the only thing left in the queue)
           case 'halo-idle': halo.idle = j.on !== false; return reply({ ok: true, idle: halo.idle })
           case 'halo-policy': halo.policy = { minPv: Math.max(0, Math.min(99, Number(j.minPv) || 0)), message: typeof j.message === 'string' ? j.message.slice(0, 160) : halo.policy.message }; return reply({ ok: true, policy: halo.policy })
           case 'halo-versions': return reply({ ok: true, versions: Object.fromEntries(halo.versions), sv: halo.sv, idle: halo.idle, policy: halo.policy })
           case 'memory-played': memory.recordPlayed(j.addr, j.side, j.outcome ?? 'test', Date.now()); break
           case 'roam-reset': roam.state = 'roam'; roam.target = null; roam.spot = null; roam.greeted.clear(); roam.personCooldown.clear(); roam.gatheringCooldown.clear(); roam.log.length = 0; roam.whispers = 0; roam.chats = 0; break
-          case 'round-config': Object.assign(CONFIG, j.config ?? {}); break // shorten the round clock etc. for tests
+          case 'round-config': Object.assign(CONFIG, j.config ?? {}); Object.assign(m.cfg, j.config ?? {}); break // shorten the round clock etc. for tests; c30: also the RUNNING match (its settings are a copy made when it started)
+          case 'config-get': { // c30: a bare read of the settings: what the running match uses and what a new match starts with (plain values only)
+            const plain = (o: Record<string, unknown>) => Object.fromEntries(Object.entries(o).filter(([, v]) => typeof v !== 'function'))
+            return reply({ ok: true, running: plain(m.cfg as any), next: plain(CONFIG as any) })
+          }
           case 'end-match': (m as any).finish(j.winner ?? 'hunters'); break // test: jump to the Ending so the replay menu can be reached
           case 'roam-config': Object.assign(roam.cfg, j.config ?? {}); break
           case 'teleport': for (const p of [...m.players.values()]) if (!j.pid || p.id === j.pid) m.teleportPlayer(p.id, { x: j.x, y: j.y ?? 0, z: j.z }, String(j.tag ?? 'admin')); break // test: ask the halo for one movePlayerTo
@@ -336,6 +348,13 @@ const MAX_PLAYERS = Number(process.env.EMANATE_MAX_PLAYERS ?? 64)
   // ---- the roaming Synth (entry portal, stage 1, no AI). EMANATE_SYNTH_ROAM=on; it runs while no match has players ----
   const roamOn = process.env.EMANATE_SYNTH_ROAM === 'on'
   const memory = new Memory(path.join(ROOT, 'data', 'memory.json'))
+  // c31 (privacy): the Synth keeps memory only for players who joined through the Halo. One-time purge of every stored record of someone who never joined; the rollback copy is made first (data/memory.json.pre-c31, never overwritten).
+  const purgeNonJoined = () => {
+    const f = path.join(ROOT, 'data', 'memory.json'), bak = f + '.pre-c31'
+    if (fs.existsSync(f) && !fs.existsSync(bak)) fs.copyFileSync(f, bak)
+    return memory.dropNonJoined()
+  }
+  try { const n = purgeNonJoined(); if (n) console.log(JSON.stringify({ t: Date.now(), purgedNonJoined: n })) } catch (e) { console.error('[purge-nonjoined]', String((e as Error)?.message ?? e)) }
   let riftCfg: RiftOpts = {}
   const halo = new HaloControl()
   // round 24: standing halo settings from the environment (a JSON object, for example {"fx":{"plumePuffs":48}}): they survive a restart; admin halo-settings changes them live
@@ -361,7 +380,11 @@ const MAX_PLAYERS = Number(process.env.EMANATE_MAX_PLAYERS ?? 64)
   if (roamOn) {
     refreshPublic()
     setInterval(refreshPublic, 30000).unref()
+    let heldForBubble = false
     setInterval(() => {
+      // c30b (Forces): while the lobby bubble stands the Synth stays STILL at its centre, so players can find and approach it: no roaming, one stop
+      if (m.bubble) { if (!heldForBubble && realSynth()) sendSynthCommand({ cmd: 'stop' }); heldForBubble = true; return }
+      heldForBubble = false
       if (!realSynth() || m.players.size > 0) return
       sendSynthCommand({ cmd: 'players' })
       const cmds = roam.step(m.synth, [...spots, ...injectedSpots], people, chats.splice(0), injectedEvents ?? events)

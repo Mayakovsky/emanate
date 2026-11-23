@@ -18,5 +18,9 @@ try:
     m = re.search(r'export const FINAL_NO_TEST_POWERS\s*=\s*(true|false)', st)
     chk('FINAL_NO_TEST_POWERS is true in the source (step 13; the flag name is minified out of the zip)', bool(m) and m.group(1) == 'true', m.group(1) if m else 'not found')
 except OSError as e: chk('settings.ts readable', False, e)
+try:   # Directive Y item 5: the test-only trace upload must sit behind the same flag
+    gs = open(os.path.join(src, 'src', 'game.ts'), encoding='utf8').read()
+    chk('trace upload gated by FINAL_NO_TEST_POWERS (no diagnostics sent from the final build)', bool(re.search(r"!FINAL_NO_TEST_POWERS\)\s*sendGameEvent\(\{\s*ev:\s*'trace'", gs)))
+except OSError as e: chk('game.ts readable', False, e)
 print('INFO step 14 (the crack file from Forces): cannot be verified by name; slot blast.crack is a placeholder (crackle tone) until the file is supplied; confirm by hand against the zip listing')
 print('ALL PASS' if all(res) else 'NOT READY: %d failing' % res.count(False)); sys.exit(0 if all(res) else 1)

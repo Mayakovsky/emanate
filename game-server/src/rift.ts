@@ -6,7 +6,7 @@
 // Pure: it returns the halo commands and the Synth's steps; the server queues them. The halo needs no change (the `portal` and `smoke` library effects take any position).
 import type { Vec } from './geo.ts'
 
-export type RiftKind = 'trigger' | 'helper-ending' | 'hunter-ending'
+export type RiftKind = 'trigger' | 'helper-ending' | 'hunter-ending' | 'ending' // c30: 'ending' = PP2 at the Synth's own spot (the different heights are dropped)
 export interface RiftTrigger { kind: RiftKind; at: Vec }
 export interface RiftPlan {
   halo: Record<string, unknown>[]

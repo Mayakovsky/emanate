@@ -32,7 +32,7 @@ export interface MatchDeps {
 export class Match {
   mode: Mode = 'solo'
   round = 1
-  state: 'lobby' | 'playing' | 'ended' | 'final' = 'playing'
+  state: 'lobby' | 'playing' | 'ended' | 'final' | 'ending' | 'replay' = 'playing' // c30: 'ending' = the winner's portal and the Storm; 'replay' = the two replay portals and their countdown
   // ---- round 12: the lobby ----
   lobbyEndsAt = 0
   bubble: { x: number; y: number; z: number; radius: number } | null = null
@@ -63,6 +63,10 @@ export class Match {
   drops: Drop[] = []
   endgame: { kind: 'escape' | 'containment'; x: number; z: number; winner: Side | 'players'; firstArrival: number | null; resolved: boolean } | null = null
   log: { t: number; ev: string; [k: string]: unknown }[] = []
+  // ---- c30 (Directive V): timed steps of the game sequences, and the replay portals ----
+  script: { at: number; run: () => void }[] = []
+  replayPortals: { endsAt: number; centre: Vec; hunters: Vec; helpers: Vec; sorted: boolean } | null = null
+  dropsMade = 0 // upgrade drops created in the current round (never above cfg.maxDrops in the c30 sequence)
   private inRange = new Set<string>()
   private nextId = 1
   private nextDropAt = 0
@@ -80,6 +84,147 @@ export class Match {
   note(ev: string, data: Record<string, unknown> = {}) {
     this.log.push({ t: this.d.now(), ev, ...data })
     if (this.log.length > 500) this.log.shift()
+  }
+
+  // ---- c30: the timed steps ----
+  private after(ms: number, run: () => void) {
+    this.script.push({ at: this.d.now() + ms, run })
+    this.script.sort((a, b) => a.at - b.at) // stable: steps due at the same moment keep the order they were added
+  }
+  private runScript(now: number) {
+    while (this.script.length && this.script[0]!.at <= now) this.script.shift()!.run()
+  }
+  /** a Plasma Portal appears where the Synth is: the halos draw it, the Synth walks in (server.ts, rift 'trigger') */
+  private portalAtSynth(v: 1 | 2, extra: Record<string, unknown> = {}) {
+    const at = { ...this.synth }
+    this.broadcast({ ev: 'portal', v, x: at.x, y: at.y, z: at.z, seconds: this.cfg.portalSeconds, ...extra })
+    this.rifts.push({ kind: v === 1 ? 'trigger' : 'ending', at })
+    this.note('portal', { v, x: Math.round(at.x), z: Math.round(at.z) })
+    return at
+  }
+  /**
+   * The blast step (game start, every round change, the replay start): the Synth's NEW starting position is set FIRST (so the Glimpse Signal marks the new spot,
+   * not the old one), then every player is blasted into the sky, the Glimpse Signal fires at the new spot, and the round starts.
+   */
+  private blastStep(place: () => void) {
+    this.bubble = null
+    this.state = 'playing'
+    this.script = []
+    this.charge = { stage: 'free', side: 'hunters', contributors: new Set(), windowEnd: 0 }
+    this.inRange.clear()
+    this.pendingAdvance = null
+    place() // 1. the new start position (also bumps the round when this is a round change)
+    this.broadcast({ ev: 'blast', centre: this.cfg.blastCentre, cx: this.synth.x, cz: this.synth.z, radius: this.cfg.blastRadius, seed: Math.floor(this.d.rng() * 4294967295) }) // 2. the blast: every halo throws its wearer up
+    this.broadcast({ ev: 'glimpse-signal', x: this.synth.x, y: this.synth.y, z: this.synth.z, seconds: this.round >= 3 ? this.cfg.glimpseSecondsLast : this.cfg.glimpseSeconds }) // 3. the signal at the new spot
+    this.startRound(true) // 4. the round
+  }
+  /** the Synth's start position for a round: solo = near the player, otherwise around the group */
+  private placeForRound() {
+    const ps = [...this.players.values()]
+    if (this.mode === 'solo' && ps.length) this.placeSynthNear(ps[0]!.pos, this.cfg.synthStartDistance)
+    else this.placeSynthAroundGroup()
+  }
+  /** after a round other than the last: PP1 where the Synth is, the Synth goes into it, then the blast with the burst, the Glimpse Signal and the next round (c30b: the Strike after round 1 and the Aurora after round 2 only when cfg.cineFx is on) */
+  private roundChange() {
+    const finished = this.round
+    const at = this.portalAtSynth(1)
+    this.after(this.cfg.portalSeconds * 1000, () => {
+      // Directive Y fix: around the PP1 spot `at`, not this.synth: by now the Rift has parked the real Synth 850 m away and the bridge has reported that spot
+      const go = () => this.blastStep(() => { this.round++; if (this.mode === 'solo') this.teleportSynthWithin(this.cfg.teleportOnFailRadius, at); else this.placeSynthAroundGroup() })
+      // c30b (Directive W): the Strike (E8) and the Aurora (E9) are switched off by default (cfg.cineFx); their recipes stay in the Halo for a later redesign
+      if (finished === 1 && this.cfg.cineFx) {
+        this.broadcast({ ev: 'strike', x: at.x, y: at.y, z: at.z, seconds: this.cfg.strikeSeconds })
+        this.after(this.cfg.strikeSeconds * 1000, go)
+      } else {
+        if (finished === 2 && this.cfg.cineFx) this.broadcast({ ev: 'aurora', seconds: this.cfg.auroraSeconds })
+        go()
+      }
+    })
+  }
+  /** the ending: PP2 in the winner's colour, the Synth goes in, the Storm plays, then the two replay portals */
+  private endingSequence(winner: Side) {
+    this.state = 'ending'
+    this.endgame = null
+    const storm = this.cfg.cineFx ? this.cfg.stormSeconds : 0 // c30b (Directive W): the Storm (E10) is off by default: PP2, the Synth goes in, then straight to the replay portals
+    const total = this.cfg.portalSeconds + storm + 1
+    const at = this.portalAtSynth(2, { side: winner, seconds: total })
+    this.note('ending', { winner })
+    this.after(this.cfg.portalSeconds * 1000, () => {
+      if (!storm) { this.openReplay(at); return }
+      this.broadcast({ ev: 'storm', seconds: this.cfg.stormSeconds })
+      this.after(this.cfg.stormSeconds * 1000, () => this.openReplay(at))
+    })
+  }
+  private openReplay(at: Vec) {
+    const off = this.cfg.portalOffset, now = this.d.now()
+    this.state = 'replay'
+    this.replayPortals = { endsAt: now + this.cfg.replaySeconds * 1000, centre: { ...at }, hunters: { x: at.x - off, y: at.y, z: at.z }, helpers: { x: at.x + off, y: at.y, z: at.z }, sorted: false }
+    this.note('replay-open', { seconds: this.cfg.replaySeconds })
+  }
+  /** what every halo may see without any player data while the replay portals stand (net: bare state) */
+  replayPublic(): { left: number; radius: number; hunters: Vec; helpers: Vec } | null {
+    const R = this.replayPortals
+    if (this.state !== 'replay' || !R) return null
+    return { left: Math.max(0, Math.round((R.endsAt - this.d.now()) / 100) / 10), radius: this.cfg.portalJoinRadius, hunters: R.hunters, helpers: R.helpers }
+  }
+  private replayStep(now: number) {
+    const R = this.replayPortals
+    if (!R) return
+    const cand = [...this.players.values(), ...this.waiting.values()] // a wearer who never joined and holds E in a portal ticks in as `waiting`: standing in a portal is the wearer's own choice
+    const rad = this.cfg.portalJoinRadius
+    const inPortal = new Set<string>()
+    for (const p of cand) {
+      if (dist2d(p.pos, R.hunters) <= rad) { p.side = 'hunters'; inPortal.add(p.id) }
+      else if (dist2d(p.pos, R.helpers) <= rad) { p.side = 'helpers'; inPortal.add(p.id) }
+    }
+    if (!R.sorted && now >= R.endsAt - this.cfg.autosortSeconds * 1000) {
+      R.sorted = true
+      const near = cand.filter((p) => dist2d(p.pos, R.centre) <= this.cfg.replayRange)
+      let h = near.filter((p) => inPortal.has(p.id) && p.side === 'hunters').length, g = near.filter((p) => inPortal.has(p.id) && p.side === 'helpers').length
+      for (const p of near) {
+        if (inPortal.has(p.id)) continue
+        p.side = h <= g ? 'hunters' : 'helpers'
+        if (p.side === 'hunters') h++; else g++
+      }
+      this.note('autosort', { hunters: h, helpers: g })
+    }
+    if (now >= R.endsAt) this.endReplay()
+  }
+  private endReplay() {
+    const R = this.replayPortals!
+    this.replayPortals = null
+    const cand = [...this.players.values(), ...this.waiting.values()]
+    const inRange = cand.filter((p) => dist2d(p.pos, R.centre) <= this.cfg.replayRange)
+    // nobody in range: the portals close and the game goes back to waiting for a lobby
+    if (inRange.length === 0) {
+      for (const p of [...this.players.values()]) { this.players.delete(p.id); this.waiting.set(p.id, p) }
+      this.note('replay-closed')
+      this.synth = { ...R.centre }
+      this.synthTeleports.push({ x: this.synth.x, z: this.synth.z })
+      this.held = { pos: { ...this.synth }, until: this.d.now() + 3000 }
+      if (this.cfg.lobbyEnabled) this.startLobby(this.synth)
+      else this.state = 'ended'
+      return
+    }
+    const hunters = inRange.filter((p) => p.side === 'hunters').length, helpers = inRange.length - hunters
+    const need = (m: Mode) => (this.cfg.replayMin > 0 ? this.cfg.replayMin : m === 'multiplayer' ? 6 : m === 'coop' ? 3 : 1)
+    // too few for the mode: fall back one mode (multiplayer -> coop -> solo)
+    let mode: Mode = 'solo'
+    if (inRange.length >= need('multiplayer') && Math.min(hunters, helpers) >= 3) mode = 'multiplayer'
+    else if (inRange.length >= need('coop')) mode = 'coop'
+    for (const p of cand) {
+      if (inRange.includes(p)) { this.waiting.delete(p.id); this.players.set(p.id, p); p.lastSeen = this.d.now() }
+      else if (this.players.delete(p.id)) { this.waiting.set(p.id, p); p.queue.push({ ev: 'lobby-wait' }) }
+    }
+    this.setMode(mode)
+    this.round = 1
+    this.wins = { hunters: 0, helpers: 0 }
+    this.synthLevel = this.cfg.synthStartLevel
+    this.synthTrapUntil = 0
+    this.replaying = false; this.replayCount = 0; this.finalDone = false; this.singleRound = null; this.endgame = null
+    if (mode === 'multiplayer') this.balanceSides()
+    this.note('replay-start', { mode, count: inRange.length, hunters, helpers })
+    this.blastStep(() => this.placeForRound())
   }
 
   // ---- the lobby: the Synth calls everyone into a bubble, a join timer runs, the equipped players inside when it ends are the game ----
@@ -127,9 +272,17 @@ export class Match {
     const mode = this.modeForCount(inside.length)
     this.setMode(mode)
     this.state = 'playing'
-    this.bubble = null
     this.roundStart = now
     this.note('lobby-end', { count: inside.length, mode })
+    if (this.cfg.cinematics) { // c30: the lobby bubble stays while PP1 stands in it; the Synth goes into PP1; then the blast, the Glimpse Signal, round 1
+      this.finishChoices()
+      if (mode === 'multiplayer') this.balanceSides()
+      for (const p of inside) p.queue.push({ ev: 'lobby-end', mode, count: inside.length })
+      this.portalAtSynth(1)
+      this.after(this.cfg.portalSeconds * 1000, () => this.blastStep(() => { if (!this.cfg.teleportStart || mode === 'solo') this.placeForRound(); else { this.teleportGroup([...this.players.values()]); this.placeSynthAroundGroup() } }))
+      return
+    }
+    this.bubble = null
     this.rifts.push({ kind: 'trigger', at: { ...this.synth } }) // the Rift opens where the Synth stands, in every mode
     for (const p of inside) p.queue.push({ ev: 'lobby-end', mode, count: inside.length })
     this.finishChoices()
@@ -302,7 +455,7 @@ export class Match {
     this.held = { pos: { ...this.synth }, until: this.d.now() + 3000 }
   }
   synthTeleports: { x: number; z: number }[] = []
-  rifts: { kind: 'trigger' | 'helper-ending' | 'hunter-ending'; at: Vec }[] = [] // round 24: Rift triggers for the server to draw (the Synth's position and height at that moment)
+  rifts: { kind: 'trigger' | 'helper-ending' | 'hunter-ending' | 'ending'; at: Vec }[] = [] // round 24: Rift triggers for the server to draw (the Synth's position and height at that moment)
   synthExposure = 1 // set by the Synth brain: how much brighter its effects are for halo wearers (v3: stronger while it hides inside built parcels)
   // after a teleport, feed positions that have not caught up (still near the old spot) are ignored for a moment
   held: { pos: Vec; until: number } | null = null
@@ -346,15 +499,19 @@ export class Match {
     }
     this.plumes = this.plumes.filter((p) => now < p.expires)
     this.traps = this.traps.filter((t) => now < t.expires)
+    if (this.script.length) this.runScript(now) // c30: the timed steps of the sequences
     if (this.state === 'lobby') {
       this.lobbyStep(now)
       return
     }
     this.drops = this.drops.filter((p) => now < p.expires)
+    if (this.state === 'replay') { this.replayStep(now); return }
+    if (this.state === 'ending') return // the winner's portal and the Storm: the script moves it on
     if (this.state !== 'playing') {
       this.endgameStep(now)
       return
     }
+    if (this.script.length) return // a cinematic is running (PP1, the Strike): the round is frozen until the blast step
     // a completed Charge: the Synth stays frozen for a moment, then the round moves on (teleport, next round or the Ending)
     if (this.pendingAdvance) {
       if (now >= this.pendingAdvance.at) {
@@ -535,6 +692,8 @@ export class Match {
     const lastRound = this.mode === 'multiplayer' ? this.cfg.multiplayerMaxRounds : this.cfg.rounds
     if (this.round >= lastRound || decided) {
       this.finish(side)
+    } else if (this.cfg.cinematics) {
+      this.roundChange() // c30: PP1, Strike or Aurora, blast, Glimpse Signal, then the next round
     } else {
       this.round++
       if (this.mode === 'solo' || !this.cfg.lobbyEnabled) this.teleportSynthWithin(this.cfg.teleportOnFailRadius)
@@ -580,13 +739,15 @@ export class Match {
     this.traps = []
     for (const p of this.players.values()) p.trapUntil = 0
     this.synthTrapUntil = 0
+    if (this.cfg.cinematics) this.makeRoundDrops() // c30: every drop of the round exists from the start and is shown (from the blast on) until a player collects it
     this.broadcast({ ev: 'round-start', round: this.round })
     if (this.cfg.tossStartRounds.includes(this.round) && this.round <= 2) this.broadcast({ ev: 'toss', round: this.round, altitude: this.cfg.tossAltitude })
-    if (this.cfg.blastStart && newRound && this.round === 1) this.broadcast({ ev: 'blast', centre: this.cfg.blastCentre, cx: this.synth.x, cz: this.synth.z, radius: this.cfg.blastRadius, seed: Math.floor(Math.random() * 4294967295) })
+    if (this.cfg.blastStart && !this.cfg.cinematics && newRound && this.round === 1) this.broadcast({ ev: 'blast', centre: this.cfg.blastCentre, cx: this.synth.x, cz: this.synth.z, radius: this.cfg.blastRadius, seed: Math.floor(Math.random() * 4294967295) })
     this.note('round-start', { round: this.round })
   }
 
   private finish(winner: Side) {
+    if (this.cfg.cinematics) { this.endingSequence(winner); return } // c30: PP2 in the winner's colour, the Storm, the two replay portals (no marked spot, no level choice)
     this.state = 'ended'
     const nearest = this.d.emptyParcelFinder?.(this.synth.x, this.synth.z) ?? { x: this.synth.x, z: this.synth.z }
     // Ending 1 Escape (players helping the Synth) / Ending 2 Containment (players capturing it)
@@ -628,7 +789,21 @@ export class Match {
   }
 
   // ---- upgrades ----
+  /** c30: all of the round's drops at once, around the Synth's new start, never more than cfg.maxDrops; they stay until collected (or the round's clock runs out) */
+  private makeRoundDrops() {
+    this.drops = []
+    this.dropsMade = 0
+    const [lo, hi] = this.cfg.dropSpawnMinMax, now = this.d.now()
+    for (let i = 0; i < Math.max(0, Math.floor(this.cfg.maxDrops)); i++) {
+      const a = this.d.rng() * Math.PI * 2, r = lo + this.d.rng() * (hi - lo)
+      const kind: DropKind = this.round <= this.cfg.haloBoostMaxRound && this.d.rng() < 0.6 ? 'boost' : 'plume'
+      this.drops.push({ id: this.nextId++, kind, pos: { x: this.synth.x + Math.cos(a) * r, y: this.synth.y, z: this.synth.z + Math.sin(a) * r }, expires: now + (this.cfg.roundSeconds + 60) * 1000 })
+      this.dropsMade++
+    }
+    this.note('drops-made', { n: this.dropsMade })
+  }
   private spawnDrops(now: number) {
+    if (this.cfg.cinematics) return // c30: the drops are made once, at the round start
     if (now < this.nextDropAt || this.drops.length >= this.cfg.dropMax) return
     this.nextDropAt = now + this.cfg.dropSpawnEverySeconds * 1000
     // near the action: around the Synth

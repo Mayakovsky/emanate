@@ -59,3 +59,31 @@ test('c24f candidate: the particles command is accepted for the three kinds and 
   assert.equal(h.command('all', { c: 'particles', kind: 'fire', x: NaN }), false)
   assert.equal((h.forTick('0xabc', 0) as any).cmds.length, 3)
 })
+
+test('c29: the look section and the look command (Plan v2)', () => {
+  const h = new HaloControl()
+  assert.equal(h.set({ look: { 'E13.smoke.size': 1.4, 'E1.color': '1,0.1,0.03' } }), 2)
+  assert.equal(h.set({ look: { ['x'.repeat(41)]: 1 } }), 0) // key over 40 chars
+  assert.equal(h.set({ look: { 'E1.color': 'x'.repeat(201) } }), 0) // value over 200 chars
+  h.sawPlayers.add('0xabc')
+  assert.equal(h.command('0xabc', { c: 'look', id: 'E13', r: 110 }), true)
+  assert.equal(h.command('0xabc', { c: 'look', id: 'E15' }), false)
+  assert.equal(h.command('0xabc', { c: 'look', id: 'E1', x: 'a' }), false)
+})
+
+test('c29e: clear is a valid command and clearQueues drops everything queued', () => {
+  const h = new HaloControl(); h.sawPlayers.add('0xa'); h.sawPlayers.add('0xb')
+  for (let i = 0; i < 5; i++) h.command('all', { c: 'hud', text: 'x' })
+  assert.equal(h.clearQueues(), 10)
+  assert.deepEqual(h.forTick('0xa', 0).cmds, undefined)
+  assert.equal(h.command('all', { c: 'clear' }), true)
+  assert.equal((h.forTick('0xa', 0).cmds as any[]).length, 1)
+})
+
+test('c30c: the look command accepts the two archetypes PLUME and PORTAL, and still refuses other ids', async () => {
+  const { HaloControl } = await import('../src/halocontrol.ts')
+  const h = new HaloControl()
+  assert.ok(h.command('0xabc', { c: 'look', id: 'PLUME' }))
+  assert.ok(h.command('0xabc', { c: 'look', id: 'PORTAL' }))
+  assert.ok(!h.command('0xabc', { c: 'look', id: 'BOGUS' }))
+})

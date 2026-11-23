@@ -39,7 +39,7 @@ export const CONFIG = {
   // ---- round 12: the lobby (a bubble around the Synth and a join timer) and the optional toss start ----
   lobbyEnabled: false, // a lobby before round 1 (the server turns it on with EMANATE_LOBBY=on)
   lobbySeconds: 60, // the join timer
-  bubbleRadius: 10, // m: players inside the dome when the timer ends are in the game; the others wait for the next lobby
+  bubbleRadius: 5, // m (RADIUS; Forces 2026-11-22: 5 m, was 10): players inside the dome when the timer ends are in the game; the others wait for the next lobby. The halo draws at most 15 m
   teleportStart: false, // round 18: when a Coop or team game starts, the group is thrown across the map with movePlayerTo (default off; the env EMANATE_TELEPORT_START=on turns it on)
   teleportMinMetres: 300, // how far the start point is from the bubble
   teleportMaxMetres: 800,
@@ -70,7 +70,23 @@ export const CONFIG = {
   timeoutGlimpseSeconds: 8, // on a round timeout, how long the glimpse of the Synth's hiding spot lasts before it is moved
   finalCinematicAfterReplays: 3, // UNCONFIRMED: completed rounds played in the replay menu that trigger the final cinematic
   ledgerSeconds: 600, // a player who drops (a halo unload) gets their round state back if they return within this time
-  choiceDialogue: false // the Synth's pitch and the secret side choice (the server turns it on with EMANATE_CHOICE=on)
+  choiceDialogue: false, // the Synth's pitch and the secret side choice (the server turns it on with EMANATE_CHOICE=on)
+  // ---- c30 (Directive V): the new game sequence (Plasma Portals, blast at every round start, the Glimpse Signal, the replay portals). Off here so the older tests keep their meaning; the live server turns it on (EMANATE_CINEMATICS, default on) ----
+  cinematics: false,
+  cineFx: false, // c30b (Directive W): the three cinematic effects (Strike E8, Aurora E9, Storm E10) are switched off; their recipes stay in the Halo; set true (round-config) to bring them back for a redesign
+  portalSeconds: 4, // PP1 / PP2 stand this long before the Synth is gone and the cinematic or blast follows
+  strikeSeconds: 2, // E8 (after round 1) plays this long, then the blast
+  auroraSeconds: 20, // E9 (after round 2) plays alongside the blast
+  stormSeconds: 16, // E10 (the ending)
+  glimpseSeconds: 7, // E12 stays this long in rounds 1 and 2
+  glimpseSecondsLast: 4, // ... and this long in round 3 (the flying round)
+  replaySeconds: 10, // the two replay portals stand this long
+  autosortSeconds: 2, // in the last seconds the server sorts whoever has not picked a portal, to balance the teams
+  replayMin: 0, // players needed in range at the end of the countdown; 0 = the mode rules (solo 1, coop 3, multiplayer 6 with at least 3 a side)
+  replayRange: 60, // m from the portals: players this close count as "in range" at the end
+  portalOffset: 6, // m: each replay portal stands this far from the middle (side by side)
+  portalJoinRadius: 3, // m: walking this close to a replay portal picks that faction
+  maxDrops: 6 // c30: upgrade drops a round creates (all at the round start, shown until collected); the halo draws at most this many
 }
 
 export const UNCONFIRMED = [

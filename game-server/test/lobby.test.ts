@@ -25,7 +25,7 @@ test('a new match starts in the lobby: the Synth calls everyone into a bubble an
   m.upsertPlayer('a', { pos: at(103, 100) })
   const s = m.snapshot('a') as any
   assert.equal(s.match.state, 'lobby')
-  assert.equal(s.bubble.radius, 10)
+  assert.equal(s.bubble.radius, 5) // Forces 2026-11-22: radius 5 m
   assert.equal(s.bubble.x, 100)
   assert.equal(s.bubble.inside, 1)
   assert.equal(s.bubble.you, true)

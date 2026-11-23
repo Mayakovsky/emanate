@@ -38,8 +38,8 @@ test('memory tiers: nothing known -> Stranger; played as Helper -> warm; as Hunt
 test('memory is case-insensitive on addresses, keeps one-line summaries, and persists to a local file', () => {
   const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'mem-')), 'memory.json')
   const m = new Memory(f)
-  m.recordTalk(A.toUpperCase(), 'a'.repeat(500), 5)
   m.recordPlayed(A, 'helpers', 'won', 5)
+  m.recordTalk(A.toUpperCase(), 'a'.repeat(500), 5)
   const m2 = new Memory(f)
   assert.equal(m2.familiarity(A.toUpperCase()), 'helper')
   assert.ok(m2.d.talked[A.toLowerCase()]!.summary.length <= 120)
@@ -142,15 +142,18 @@ test('dismissal in any form: it backs off (one line, walks away 30 m), the addre
     assert.deepEqual(texts(out), ["Understood. I'll leave you be."])
     const w = out.find((c) => c.cmd === 'walk_to') as any
     assert.ok(Math.hypot(w.x - 38, w.z) > 29, 'walks about 30 m away')
-    assert.equal(mem.isDayOff(A, clock.now()), true)
-    clock.adv(60 * 60 * 10) // 10 hours later: still a day off
+    assert.equal(mem.isDayOff(A, clock.now()), false, 'c31: a non-joined person gets no stored day-off (RAM cooldown only)')
+    assert.equal(Object.keys(mem.d.dismissed).length + Object.keys(mem.d.talked).length, 0, 'nothing stored about a non-joined person')
+    assert.ok(!JSON.stringify(b.log).toLowerCase().includes(A.toLowerCase()), 'nothing identifying in the log')
+    clock.adv(60 * 60 * 10) // 10 hours later: still backed off (RAM cooldown)
     for (let i = 0; i < 6; i++) { b.step(at(100, 0), [s], P, [], []); clock.adv(30) }
     assert.ok(!['approach', 'linger'].includes(b.state), 'does not approach a dismissed address')
   }
 })
 
-test('a polite reply is not a dismissal; it records the talk', () => {
+test('a polite reply is not a dismissal; for a joined player it records the talk', () => {
   const { b, mem } = mk()
+  mem.recordPlayed(A, 'helpers', 'test', 0) // joined through the Halo
   const s = spot(50, 0), P = [person(A, 50, 0)]
   b.step(at(0, 0), [s], P, [], []); b.step(at(0, 0), [s], P, [], []); b.step(at(38, 0), [s], P, [], [])
   b.step(at(38, 0), [s], P, [{ from: A, text: 'hello, who are you?' }], [])
@@ -193,4 +196,32 @@ test('crowd draw slider: a bigger crowd is picked more often at high draw, equal
     return big
   }
   assert.ok(pick(1) > pick(0) + 40, `${pick(1)} vs ${pick(0)}`)
+})
+
+test('c31 privacy: a joined player gets a stored talk and day-off; a non-joined person gets nothing stored', () => {
+  const mem = new Memory()
+  const B = '0xbbbb000000000000000000000000000000000002'
+  mem.recordPlayed(A, 'hunters', 'x', 1)
+  assert.equal(mem.recordTalk(A, 'hi', 2), true)
+  assert.equal(mem.dismiss(A, 2, 24), true)
+  assert.equal(mem.recordTalk(B, 'hi', 2), false)
+  assert.equal(mem.dismiss(B, 2, 24), false)
+  assert.deepEqual(mem.counts(), { players: 1, talked: 1, dismissed: 1 })
+})
+
+test('c31 privacy: dropNonJoined deletes old stored records of non-joined addresses and keeps joined ones', () => {
+  const mem = new Memory()
+  const B = '0xbbbb000000000000000000000000000000000002'
+  mem.recordPlayed(A, 'hunters', 'x', 1); mem.recordTalk(A, 'hi', 2)
+  mem.d.talked[B.toLowerCase()] = { ts: 1, summary: 'old' }; mem.d.dismissed[B.toLowerCase()] = { until: 9e15 }
+  assert.equal(mem.dropNonJoined(), 2)
+  assert.deepEqual(mem.counts(), { players: 1, talked: 1, dismissed: 0 })
+  assert.equal(mem.dropNonJoined(), 0)
+})
+
+test('c31 privacy: the greeting of a non-joined person logs no address', () => {
+  const { b } = mk()
+  const s = spot(50, 0), P = [person(A, 50, 0)]
+  for (let i = 0; i < 8; i++) b.step(at(i < 3 ? 0 : 45, 0), [s], P, [], [])
+  assert.ok(!JSON.stringify(b.log).toLowerCase().includes(A.toLowerCase()))
 })

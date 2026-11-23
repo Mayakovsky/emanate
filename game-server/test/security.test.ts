@@ -265,7 +265,7 @@ test('c26 gate B: the bare check carries only the lobby and the bubble (no playe
     m.cfg = { ...m.cfg, lobbyEnabled: true } // the real server has the lobby on: a wearer not yet in the bubble only waits
     const bare = await (await fetch(url(port, '/halo/state?pv=1'))).json() as any
     assert.equal(bare.lobby, false); assert.equal(bare.bubble, null)
-    assert.deepEqual(Object.keys(bare).filter((k) => !['ok', 'idle', 'sv', 'lobby', 'bubble', 'refuse', 'message', 'blasts', 'call'].includes(k)), [])
+    assert.deepEqual(Object.keys(bare).filter((k) => !['ok', 'idle', 'sv', 'lobby', 'bubble', 'refuse', 'message', 'blasts', 'call', 'trails', 'replay'].includes(k)), [])
     // no lobby and not in a match: a tick is answered but carries no lease
     const r1 = await (await tick(port, T('0x' + 'a'.repeat(40)))).json() as any
     assert.equal(r1.lease, undefined)
@@ -293,5 +293,19 @@ test('c27: a launch is shown to every Halo for a few seconds (no id), the call g
     assert.equal(m.insideBubble(m.players.get(T0)), false)
     m.callJoin(T0)
     assert.equal(m.insideBubble(m.players.get(T0)), true)
+  })
+})
+
+test('c29e: while a player is in the air after a blast the bare check carries their position only (no id), and it stops on landing', async () => {
+  await withServer({}, async (port, m: any) => {
+    const pid = '0x' + 'b'.repeat(40)
+    await tick(port, { ...T(pid), events: [{ ev: 'blast' }] })
+    const a = await (await fetch(url(port, '/halo/state?pv=1'))).json() as any
+    assert.equal(a.trails.length, 1)
+    assert.deepEqual(Object.keys(a.trails[0]).sort(), ['x', 'y', 'z'])
+    assert.ok(!JSON.stringify(a).includes('bbbb'))
+    const r2 = await tick(port, { ...T(pid), events: [{ ev: 'blast-end' }] }); assert.equal(r2.status, 200)
+    const b = await (await fetch(url(port, '/halo/state?pv=1'))).json() as any
+    assert.equal(b.trails.length, 0)
   })
 })

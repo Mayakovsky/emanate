@@ -67,6 +67,8 @@ export class RoamBrain {
     this.mem = mem
     this.cfg = cfg
   }
+  // c31: an address goes into the log only for a player who joined through the Halo
+  private who(addr: string | undefined): string | undefined { return addr && this.mem.isJoined(addr) ? addr : undefined }
   private note(ev: string, data: Record<string, unknown> = {}) {
     this.log.push({ t: this.now(), ev, ...data })
     if (this.log.length > 400) this.log.shift()
@@ -122,11 +124,11 @@ export class RoamBrain {
     for (const m of chats) {
       const who = people.find((p) => p.addr.toLowerCase() === m.from.toLowerCase())
       if (!who || Math.hypot(who.pos.x - synth.x, who.pos.z - synth.z) > 60) continue
-      this.mem.recordTalk(m.from, m.text, now)
+      const joined = this.mem.recordTalk(m.from, m.text, now) // c31: stored only for players who joined through the Halo
       if (c.dismissPattern.test(m.text)) {
         this.mem.dismiss(m.from, now, c.dismissalHours)
-        this.personCooldown.set(m.from, now + c.dismissalHours * 3600 * 1000)
-        this.note('dismissed', { addr: m.from, text: m.text })
+        this.personCooldown.set(m.from, now + c.dismissalHours * 3600 * 1000) // RAM only, lost on restart
+        this.note('dismissed', joined ? { addr: m.from, text: m.text } : {}) // c31: nothing identifying logged for a non-joined person
         this.state = 'backoff'
         this.stateSince = now
         this.target = null
@@ -147,7 +149,7 @@ export class RoamBrain {
       const dx = synth.x - tooClose.pos.x, dz = synth.z - tooClose.pos.z
       const l = Math.hypot(dx, dz) || 1
       const cmd = this.send({ cmd: 'walk_to', x: synth.x + (dx / l) * 8, z: synth.z + (dz / l) * 8 }, 'step-back')
-      if (cmd) { this.note('step-back', { addr: tooClose.addr }); out.push(cmd) }
+      if (cmd) { this.note('step-back', { addr: this.who(tooClose.addr) }); out.push(cmd) }
       return out
     }
 
@@ -181,7 +183,7 @@ export class RoamBrain {
           this.target = near
           this.state = 'approach'
           this.stateSince = now
-          this.note('approach', { addr: near.addr })
+          this.note('approach', { addr: this.who(near.addr) })
           return out
         }
         if (atSpot || now - this.stateSince > 180_000) {
@@ -197,7 +199,7 @@ export class RoamBrain {
         if (!t || Math.hypot(t.pos.x - synth.x, t.pos.z - synth.z) > c.giveUpDistance) {
           // approach, never chase: if they move away it lets them go
           this.state = 'leave'; this.stateSince = now
-          this.note('gave-up', { addr: this.target?.addr })
+          this.note('gave-up', { addr: this.who(this.target?.addr) })
           return out
         }
         const quiet = this.atEvent(t.pos, events) || this.atEvent(synth, events)
@@ -207,13 +209,13 @@ export class RoamBrain {
           this.state = 'linger'; this.stateSince = now
           this.lingerFor = this.lingerSeconds() * 1000
           this.nextWhisperAt = now + 1500
-          this.note('linger', { addr: t.addr, quiet })
+          this.note('linger', this.mem.isJoined(t.addr) ? { addr: t.addr, quiet } : { quiet })
           if (!quiet && !this.greeted.has(t.addr)) {
             this.greeted.add(t.addr)
             const fam = this.mem.familiarity(t.addr)
             out.push({ cmd: 'chat', text: lineOf(GREETING_SLOT[fam]) })
             this.chats++
-            this.note('greet', { addr: t.addr, tone: fam })
+            this.note('greet', this.mem.isJoined(t.addr) ? { addr: t.addr, tone: fam } : { tone: fam })
           }
           return out
         }
@@ -230,7 +232,7 @@ export class RoamBrain {
         if (!t || Math.hypot(t.pos.x - synth.x, t.pos.z - synth.z) > c.giveUpDistance) { this.state = 'leave'; this.stateSince = now; return out }
         if (now - this.stateSince > this.lingerFor) {
           this.state = 'leave'; this.stateSince = now
-          this.note('leave', { reason: 'nobody engaged', addr: t.addr })
+          this.note('leave', { reason: 'nobody engaged', addr: this.who(t.addr) })
           return out
         }
         if (!quiet && now >= this.nextWhisperAt) {

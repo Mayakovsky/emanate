@@ -1,17 +1,23 @@
 // The public privacy notice, served as plain text at /privacy (round 22, addendum 2). Keep it true: it describes what the code does (src/net.ts in the halo, src/server.ts, src/memory.ts, src/retention.ts).
 export const PRIVACY_NOTICE = `EMANATE: PRIVACY NOTICE (halo and game server)
-Operator: Hidden Forces. Last updated: 2026-11-17.
+Operator: Hidden Forces. Last updated: 2026-11-19.
 
 What this is: Emanate Halo is a Decentraland smart wearable for the game Emanate. While it runs, it talks to one game server we run, emanate.hiddenforces.net, over HTTPS. It asks one permission, "Use the Fetch API". It does not ask for a signature, move funds, or open links.
 
+WHEN THE HALO SENDS ANYTHING ABOUT YOU
+Putting the halo on does not start the game for you. Until you join, you stay a stock avatar, the halo changes nothing about how you move, and it sends nothing about you: it only asks our server, about once every few seconds, whether a game is open and where its starting bubble is. That question carries the halo's version number and nothing that names you (no wallet address, no name, no position). The server counts how many such questions arrive per minute, as a number only, to guess how many halos are running.
+You join by standing inside the game's glowing bubble and holding E for about a second and a half. Only from then on does the halo send what is listed below.
+You can stop at any time: hold Ctrl + Shift + E. While you hold it the halo is paused and sends nothing; held for three seconds, it stays off for good until you take the halo off and put it on again. This is read by the halo on your own computer, so our server cannot override it.
+The server gives you a short "lease" (20 seconds at a time) each time it answers one of your reports. The halo's powers only run while a lease is valid and lapse by themselves if the server stops answering or you stand still for five minutes. The server can also tell every halo to switch itself off, and then nothing is drawn and nothing about you is sent.
+
 WHAT LEAVES YOUR COMPUTER
-Up to four times a second while the halo is running and can reach the server, the halo sends:
+Up to four times a second after you have joined, while the halo is running and can reach the server, the halo sends:
   - your wallet address,
   - your Decentraland display name,
   - your position in the world (x, y, z) and the position as the scene sees it,
   - your speed and your current power tier,
   - the side you chose in the game (hunters or helpers),
-  - game events (for example "placed a plume", "pressed a key") and short diagnostic messages.
+  - game events (for example "placed a plume", "pressed a key", "joined through the call", "blast launched") and short diagnostic messages.
   - the halo's version numbers (its build id, its protocol version and the version of the settings it holds), so the server can tell which halo you run.
 The server may switch the halo off at any time ("idle"): while idle it sends nothing about you; it only asks, with no personal field, whether to wake up.
 Nothing else: no keystrokes outside the game's own keys, no data about other avatars, no files, no wallet signing.
@@ -21,6 +27,10 @@ The Synth is an ordinary Decentraland avatar, so its client sees what any avatar
 
 WHERE IT GOES, AND WHERE IT IS HANDLED
 Only to our server at emanate.hiddenforces.net (a rented virtual server). It is not sent to Decentraland and not shared with anyone else. The game character, the Synth, runs as a Decentraland client on a computer we operate, which talks to the server through a link we run (the "bridge"); that computer therefore also handles what the Synth sees (see below).
+
+THE BLAST AND THE CALL
+Blast: when a player is thrown into the sky by the game's "blast" (it can be triggered by the game or by the player's own key), the server notes the launch point (a position, with no name or address) for a few seconds and tells every halo nearby so the red bubble can be drawn for everyone. Others see that a blast happened at that place, not who launched it.
+Call: when a game is opening and few players are near, the server can send every halo a "call": the position of the starting bubble, for a limited time. Halos far from the bubble show a portal to it. A call carries no information about any player. If you join through the call, the halo reports "joined through the call" like any other game event, and the server counts it.
 
 WHAT THE SERVER SENDS BACK TO YOUR HALO
 Every reply carries the state of the match, so your halo can draw it: the match mode, round, timer and score; your own state (plumes left, boost, trap, tier); the Synth's position and whether it is in a dead zone; the position and time left of plumes, traps, power-up drops, the lobby bubble and the endgame; and how many players are inside the lobby bubble (a number). It does NOT send other players' addresses, names or positions to your halo. What other players place (plumes, traps) is visible to everyone in the match as a location, without saying who placed it. So "not shared with anyone else" holds for other players' halos, with that one exception: where you place a plume or trap is shown to the others in the same match.
