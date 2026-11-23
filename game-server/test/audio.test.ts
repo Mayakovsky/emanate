@@ -49,7 +49,7 @@ test('manifest: nothing recorded -> 0 available; a recording is picked up with s
   m = buildManifest(dir, 'http://x')
   const s = m.slots.find((x) => x.id === 'end.portal.escape.line')!
   assert.equal(s.available, true)
-  assert.equal(s.url, 'http://x/audio/files/end_portal_escape_line.wav')
+  assert.equal(s.url, 'http://x/audio/files/end_portal_escape_line.wav?v=' + s.sha)
   assert.equal(s.bytes, 8)
   assert.equal(m.recorded, 1)
 })

@@ -35,6 +35,9 @@ test('the Synth is never left far away: an ending parks it, a trigger leaves it 
   const end = planRift({ kind: 'hunter-ending', at: { x: 5, y: 0, z: 5 } })
   const last = end.synth[end.synth.length - 1]!
   assert.deepEqual([(last.cmd as any).x, (last.cmd as any).z], [0, -124]); assert.ok(last.afterMs <= 6000)
+  // c30d: the Synth is out of the portal (600 m off) by 2 s, well inside PP2's 4 s, so it is gone before the replay portals open
+  const away = end.synth.find((st) => Math.abs((st.cmd as any).x - 5) > 300)!
+  assert.ok(away.afterMs <= 2000, 'gone by 2 s'); assert.ok(away.afterMs < last.afterMs)
   const trig = planRift({ kind: 'trigger', at: { x: 5, y: 2, z: 5 } })
   assert.ok(trig.endMs < 5000)
 })

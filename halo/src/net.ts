@@ -119,6 +119,7 @@ export function netUpdate(dt: number, info: TickInfo) {
       inFlight = false
       lastOk = clock
       failCount = 0
+      lastErr = '' // c30d: a good reply clears the last error ("Error: http 502" stayed on the HUD after a server restart)
       handleReply(j)
       if (j && j.state) serverState = j.state
     })

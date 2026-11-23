@@ -241,7 +241,7 @@ function gateUpdate(dt: number, world: Vec) {
   gateDbg = 'world ' + world.x.toFixed(0) + ',' + world.z.toFixed(0) + (b ? '  bubble ' + b.x.toFixed(0) + ',' + b.z.toFixed(0) + ' dist ' + Math.hypot(world.x - b.x, world.z - b.z).toFixed(0) + '/' + b.radius : '  no bubble') + '  E-hold ' + joinHold.toFixed(1) + (inside ? '  INSIDE' : '')
   if (inside && !wasInside) note(say('joinPrompt'))
   wasInside = inside
-  if (inside && e && !ctrl && !shift) { joinHold += dt; if (joinHold >= 1.5) { grantConsent(); if (inP || inRp) emit('joinCall', {}); joinHold = 0; note('You joined. Hold Ctrl + Shift + E to pause; hold it 3 seconds to leave.') } } else joinHold = 0
+  if (inside && e && !ctrl && !shift) { joinHold += dt; if (joinHold >= 1.5) { grantConsent(); playSlot('lobby.join'); if (inP || inRp) emit('joinCall', {}); joinHold = 0; note('You joined. Hold Ctrl + Shift + E to pause; hold it 3 seconds to leave.') } } else joinHold = 0
 }
 
 // ---- the per-frame update; me = the wearer's scene-local position ----
@@ -548,7 +548,7 @@ function syncBubble(dt: number, me: Vec, world: Vec) {
     lobbyNote = `LOBBY: ${b.inside} inside, ${Math.ceil(b.leftMs / 1000)} s left${b.you ? ' (you are in)' : ' (step into the bubble)'}`
     shown = true
   }
-  if (!shown) bubbleFx.hide()
+  if (!shown) { bubbleFx.hide(); if (lobbyNote.startsWith('LOBBY:')) lobbyNote = '' } // c30d: the lobby line goes with the bubble (it lingered into round 1)
 }
 
 // ---- trace reports: each goes to the console log and (with the server up) to the server's log ----
@@ -621,10 +621,19 @@ function bareFxUpdate(world: Vec, me: Vec) {
   if (portal && (clock > portal.until || consent)) { lookFx.remove('call'); portal = null }
   // c30: the two replay portals (PP2: hunters dark purple, helpers golden), side by side, while the countdown runs
   const rp = bareFx.replay
+  replayTick(rp ? rp.left : null)
   if (rp && feature('particles')) {
     if (!lookFx.has('rp-h')) lookFx.effect('E11', toLocal(rp.hunters), clock, { seconds: rp.left + 1, winner: 'hunters' }, 'rp-h')
     if (!lookFx.has('rp-g')) lookFx.effect('E11', toLocal(rp.helpers), clock, { seconds: rp.left + 1, winner: 'helpers' }, 'rp-g')
   } else if (lookFx.has('rp-h') || lookFx.has('rp-g')) { lookFx.remove('rp-h'); lookFx.remove('rp-g') }
+}
+// c30d: replay.tick once per second of the replay countdown (10 times for 10 s); the end time is kept locally and re-synced when the server's count runs ahead
+let replayEnd = 0, replayN = 0
+function replayTick(left: number | null) {
+  if (left === null) { replayEnd = 0; replayN = 0; return }
+  if (replayEnd === 0 || clock + left < replayEnd - 1) { replayEnd = clock + left; replayN = Math.ceil(left) + 1 }
+  const n = Math.ceil(replayEnd - clock)
+  if (n >= 1 && n < replayN) { replayN = n; playSlot('replay.tick') }
 }
 let trailRoom = 0
 const bubbleEmitters = () => bubs.reduce((a, b) => a + b.b.n, 0)
@@ -853,8 +862,8 @@ function handleServerEvent(ev: any) {
   switch (ev.ev) {
     case 'contact': contactFx = { pos: { x: ev.x, y: ev.y, z: ev.z }, until: clock + 1.5, stage: ev.stage === 'free' ? 'reset' : ev.stage }; break
     case 'warn5': playSlot('warn.five_minutes'); note('5 minutes left in the round'); break
-    case 'round-start': cue('round-start'); budget.refill(); note(say('roundStart', { round: ev.round })); playSlot('round.start'); break
-    case 'round-complete': note(`round ${ev.round} complete (${ev.side})`); break // c30: the cinematics are their own events (portal, strike, aurora, blast)
+    case 'round-start': lobbyNote = ''; cue('round-start'); budget.refill(); note(say('roundStart', { round: ev.round })); playSlot('round.start'); break
+    case 'round-complete': note(`round ${ev.round} complete (${ev.side})`); playSlot('round.complete'); break // c30d: its sound again (Forces's list: a round is won) // c30: the cinematics are their own events (portal, strike, aurora, blast)
     case 'round-timeout':
       note('TIME IS UP: the Synth moves')
       playSlot('round.timeout')
@@ -915,7 +924,7 @@ function portalEvent(ev: any) {
 function glimpseSignal(ev: any) {
   const at = evPos(ev); if (!at || !feature('particles')) return
   lookFx.effect('E12', at, clock, { seconds: Math.max(1, Math.min(30, num2(ev.seconds, 7))) }, 'glimpse') // the Synth's NEW starting spot: a pale-cyan column to max height
-  playSlot('cine.rift.snap') // placeholder cue: Forces supplies the sound file; a spare slot until then
+  playSlot('glimpse.signal') // c30d: its own slot (was the spare cine.rift.snap)
   emit('glimpse-signal', { seconds: ev.seconds })
 }
 

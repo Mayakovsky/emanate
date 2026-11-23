@@ -44,6 +44,8 @@ export const SLOTS: Slot[] = [
   S('round.start', 'Round and charge', 'A round begins', 'Round begins.', 'Start of each round', null, 2),
   S('round.complete', 'Round and charge', 'A round is won (charge completed)', 'Charge complete.', 'The third contact (or last needed) completes the charge', 'charge', 2),
   S('round.timeout', 'Round and charge', 'Time ran out; the Synth is moved', 'Time is up.', 'The 20 minute clock ends', null, 2),
+  S('lobby.join', 'Round and charge', 'You joined: the join completes (held E inside the lobby bubble, the call portal or a replay portal)', '', 'The 1.5 s E hold completes', null, 1),
+  S('glimpse.signal', 'Round and charge', "The Glimpse: a pale-cyan column lights up at the Synth's new starting spot", '', 'Every Glimpse (after each blast, before the round starts)', null, 2),
   S('charge.contact', 'Round and charge', 'Charging effect begins: arcs from the halo to the Synth', '', 'A player comes within 5 m of the Synth', 'charge', 2),
   S('charge.reset', 'Round and charge', 'Synth enters Reset Mode (slowed for 10 s)', '', 'First contact', 'charge', 2),
   S('charge.repair', 'Round and charge', 'Synth enters Repair Mode (Hunters) and freezes', '', 'Second contact by Hunters', 'charge', 2),
@@ -75,7 +77,8 @@ export const SLOTS: Slot[] = [
   S('end.portal.contain.open', 'The ending', 'Purple portal (Containment) opens', '', 'Ending 2 begins', null, 4, true),
   S('end.portal.escape.line', 'The ending', 'The Synth, to the players, as they fly through the yellow portal', 'Follow me.', 'Ending 1: the players follow the Synth', 'escape', 3),
   S('end.portal.contain.line', 'The ending', 'The Synth, as it is pulled into the purple portal', 'Please no!', 'Ending 2: all players arrive', 'contain', 3),
-  S('end.portal.contain.pull', 'The ending', 'The Synth is sucked into the portal and disappears', '', 'Ending 2, after the line', null, 4)
+  S('end.portal.contain.pull', 'The ending', 'The Synth is sucked into the portal and disappears', '', 'Ending 2, after the line', null, 4),
+  S('replay.tick', 'The ending', 'One tick of the replay countdown (walk into a portal to pick your side)', '', 'Each second of the 10 s replay countdown: 10 times', null, 0.2)
 ]
 
 /** The file a slot is recorded to. */

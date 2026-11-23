@@ -20,6 +20,7 @@ export const RIFT_HEIGHT = 6
 export const RIFT_HALF_WIDTH = 2
 export const RIFT_SECONDS = 14
 export const RIFT_STEP_MS = 4500 // the Synth's walk into the Rift takes about 3.5 s; the match's own placement of the Synth waits this long
+export const ENDING_GONE_MS = 1600 // c30d: an ending's Synth leaves the portal this long after the Rift starts (PP2 stands portalSeconds = 4 s)
 export const PARK: Vec = { x: 0, y: 0, z: -124 } // where an ending's Synth waits: the spot it has sat at safely for hours
 export const SMOKE_CAP = 200 // the halo's cap for a smoke column
 
@@ -45,12 +46,13 @@ export function planRift(t: RiftTrigger, ceiling = 200, opts: RiftOpts = {}): Ri
     { afterMs: 400, cmd: { cmd: 'walk_to', x: t.at.x, z: t.at.z } },
     { afterMs: 400 + walkMs, cmd: { cmd: 'move', x: t.at.x + 600, y: 0, z: t.at.z + 600 } }
   ] : [
-    // an ending: to the oval's edge, into its middle, then away
+    // an ending: to the oval's edge, into its middle, then away. c30d: gone at 1.6 s (was 3.3 s), so the Synth is out of sight before PP2 closes and the replay portals open
+    // (at 3.3 s plus the tick, the bridge and the viewer's lag it still stood in the portal when the replay countdown began, Directive Y run 3)
     { afterMs: 0, cmd: { cmd: 'move', x: t.at.x - 3, y: base, z: t.at.z - 1 } },
-    { afterMs: 2500, cmd: { cmd: 'move', x: t.at.x, y: base, z: t.at.z } },
-    { afterMs: 3300, cmd: { cmd: 'move', x: t.at.x + 600, y: 0, z: t.at.z + 600 } }
+    { afterMs: 1000, cmd: { cmd: 'move', x: t.at.x, y: base, z: t.at.z } },
+    { afterMs: ENDING_GONE_MS, cmd: { cmd: 'move', x: t.at.x + 600, y: 0, z: t.at.z + 600 } }
   ]
   // an ending: park the Synth at the safe spot (it is 600 m away only for about 2 s: the scene runtime loads what is around it); a lobby end needs no step, the match's placement follows
-  if (t.kind !== 'trigger') synth.push({ afterMs: 5500, cmd: { cmd: 'move', x: PARK.x, y: PARK.y, z: PARK.z } })
+  if (t.kind !== 'trigger') synth.push({ afterMs: ENDING_GONE_MS + 2000, cmd: { cmd: 'move', x: PARK.x, y: PARK.y, z: PARK.z } })
   return { halo, synth, centre, endMs: synth[synth.length - 1]!.afterMs }
 }

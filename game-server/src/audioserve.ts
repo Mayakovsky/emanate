@@ -23,7 +23,7 @@ export function buildManifest(dir: string, baseUrl: string) {
       bytes = b.length
       sha = crypto.createHash('sha256').update(b).digest('hex').slice(0, 16)
     }
-    return { id: s.id, file: fileFor(s.id), loop: !!s.loop, available: !!f, recorded: f, bytes, sha, url: f ? `${baseUrl}/audio/files/${f}` : null }
+    return { id: s.id, file: fileFor(s.id), loop: !!s.loop, available: !!f, recorded: f, bytes, sha, url: f ? `${baseUrl}/audio/files/${f}?v=${sha}` : null } // c30d: ?v=<sha>: a replaced file gets a new address, so no Halo plays a stale cached clip
   })
   return { version: 1, generatedAt: Date.now(), slots, recorded: slots.filter((s) => s.available).length, total: slots.length }
 }

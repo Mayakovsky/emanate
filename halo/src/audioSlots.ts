@@ -19,6 +19,8 @@ export const SLOT_TABLE: [string, string | null][] = [
   ['round.start', null],
   ['round.complete', 'charge'],
   ['round.timeout', null],
+  ['lobby.join', null],
+  ['glimpse.signal', null],
   ['charge.contact', 'charge'],
   ['charge.reset', 'charge'],
   ['charge.repair', 'charge'],
@@ -30,8 +32,8 @@ export const SLOT_TABLE: [string, string | null][] = [
   ['halo.upgrade_pickup', 'upgrade'],
   ['halo.boost_on', 'upgrade'],
   ['halo.arrow_overload', 'overload'],
+  ['blast.crack', 'crackle'],
   ['halo.denied', 'nokey'],
-  ['blast.crack', 'crackle'], // c27: the blast's crack; placeholder = the crackle tone until Forces's file is packed
   ['halo.warnings_on', 'upgrade'],
   ['halo.warnings_off', 'nokey'],
   ['cine.rift.strike', 'overload'],
@@ -47,6 +49,7 @@ export const SLOT_TABLE: [string, string | null][] = [
   ['end.portal.contain.open', null],
   ['end.portal.escape.line', 'escape'],
   ['end.portal.contain.line', 'contain'],
-  ['end.portal.contain.pull', null]
+  ['end.portal.contain.pull', null],
+  ['replay.tick', null]
 ]
 export const SLOT_LOOP: Record<string, boolean> = { 'cine.rift.open': true, 'cine.aurora.ambient': true, 'cine.carrington.storm': true, 'end.plume.rise': true, 'end.portal.escape.open': true, 'end.portal.contain.open': true }
