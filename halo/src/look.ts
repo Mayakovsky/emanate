@@ -274,10 +274,10 @@ export function planEffect(id: string, p: PlanParams = {}, look?: LookData): Loo
       seconds = 0.4 // re-planned every few frames while in range
       const to = p.to ?? [0, 0, 8], c = p.color ?? COLORS_NEW.amber, pts = linePts([0, 1.9, 0], to, 5, 0.25, r)
       pts.forEach((q, i) => {
-        em.push(emit('crackle', q, { kind: 'sphere', radius: 0.1 }, false, { size: 0.35, rate: 1.4, life: 1, color: c, colorEnd: col2(c, 0), ...tw('crackle') }, 1))
+        em.push(emit('crackle', q, { kind: 'sphere', radius: 0.1 }, false, { size: 0.15, rate: 1.4, life: 1, color: c, colorEnd: col2(c, 0), ...tw('crackle') }, 1)) // c30f: a very small skin on the box arcs
         if (i > 0 && i < pts.length - 1) em.push(emit('fire', q, { kind: 'sphere', radius: 0.08 }, false, { size: 0.07, rate: 0.9, speed: 0.2, color: c, colorEnd: [c[0] * 0.5, c[1] * 0.3, 0, 0], ...tw('fire') }, 2))
       })
-      em.push(emit('embers', [to[0] / 2, to[1] / 2 + 1.9 / 2, to[2] / 2], { kind: 'sphere', radius: 0.3 }, false, { size: 0.4, rate: 0.5, speed: 0.4, color: c, ...tw('embers') }, 3))
+      em.push(emit('embers', [to[0] / 2, to[1] / 2 + 1.9 / 2, to[2] / 2], { kind: 'sphere', radius: 0.3 }, false, { size: 0.2, rate: 0.5, speed: 0.4, color: c, ...tw('embers') }, 3))
       break
     }
     case 'E3': { // Upgrade Drop: a column 3 m wide, 60 m tall, pink: fire at the foot, rising embers, a glow at the foot (3 emitters: the reserved budget)
@@ -287,7 +287,10 @@ export function planEffect(id: string, p: PlanParams = {}, look?: LookData): Loo
       em.push(emit('fire', [0, 0, 0], coneUp('fire', 1.5), true, { size: 0.9, rate: 1.6, speed: 0.9, color: COLORS_NEW.pink, colorEnd: [0.6, 0.1, 0.4, 0.35], ...tw('fire') }, 1))
       em.push(emit('embers', [0, 30, 0], colBox(3, 60), true, { rate: 1.2, speed: 0.6, color: COLORS_NEW.pink, ...tw('embers') }, 2))
       em.push(emit('glow', [0, 0.5, 0], { kind: 'sphere', radius: 0.8 }, false, { size: 0.4, rate: 1.2, color: COLORS_NEW.pink, ...tw('glow') }, 3))
-      em.push(...stack('smoke', 3, 4, 60, 2, { size: 0.6, rate: 0.6, speed: 0.15, ...tw('smoke') }, 4))
+      // c30f (Directive X item 3, baked): the smoke is pink at the base and fades to very pale pink at the top (two layers, same budget as the old 2-box stack)
+      const PINK_MID: RGBA = [1, 0.62, 0.86, 0.9], PINK_PALE: RGBA = [1, 0.9, 0.96, 0.55]
+      em.push(emit('smoke', [0, 18, 0], colBox(3, 28), true, { size: 0.6, rate: 0.6, speed: 0.15, color: [1, 0.35, 0.75, 0.95], colorEnd: PINK_MID, ...tw('smoke') }, 4))
+      em.push(emit('smoke', [0, 46, 0], colBox(3, 28), true, { size: 0.6, rate: 0.6, speed: 0.15, color: PINK_MID, colorEnd: PINK_PALE, ...tw('smoke') }, 4))
       break
     }
     case 'E4': { // Discharge Trap: a small middle-grey box 0.2 m a side, a faint light-blue crackle within 0.5 m (visual only; the trap still triggers at 5 m)

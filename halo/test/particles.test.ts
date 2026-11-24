@@ -78,7 +78,7 @@ test('c24i: every stage has a cue text (plain English, one or two short lines, u
   resetToDefaults()
   for (const [ev, key] of Object.entries(CUE_BY_EVENT)) { assert.equal(cueKeyFor(ev), key); const t = say(key); assert.ok(t.length > 0 && t.length <= 160, key); assert.ok(t.split('\n').length <= 2, key) }
   assert.equal(cueKeyFor('contact'), null); assert.equal(cueKeyFor('plume'), null)
-  assert.ok(say('cueRound').includes('Press 1 for an arrow') && say('cueRound').includes('Press 4') && say('cueRound').includes('Press E to set a trap'))
+  assert.ok(!say('cueRound').includes('Press 1') && say('cueRound').includes('Press 4') && say('cueRound').includes('Press E to set a trap')) // c30f: arrows off, no arrow key in the cue
   applyRemote({ text: { cueRound: '' } }); assert.equal(say('cueRound'), ''); resetToDefaults(); assert.ok(say('cueRound').length > 0)
   applyRemote({ features: { cues: 0 } }); assert.equal(feature('cues'), false); resetToDefaults(); assert.equal(feature('cues'), true)
   applyRemote({ fx: { cueSeconds: 999 } }); assert.equal(FXS.cueSeconds, 30); resetToDefaults(); assert.equal(FXS.cueSeconds, 9)

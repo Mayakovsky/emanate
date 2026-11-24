@@ -11,7 +11,7 @@ import { planBlast, bubbleScale } from './blastplan'
 import { skyUpdate, skyText, skyStart } from './sky'
 import { openDialog, closeDialog, setDialogClock, dialog } from './dialog'
 import { planParticles } from './particleplan'
-import { ParticleFx, playLib, Arrows, Plumes, ChargeArcs, DropMarkers, TrapMarkers, BubbleFx, TestMarkers, DistanceMarkers, MARKER_COLOR_NAMES, MARKER_DISTANCES, initSounds, playSlot, playSound, soundsUpdate, setRemoteAudio, audioStats, slotSource } from './fx'
+import { ParticleFx, playLib, Arrows, Plumes, ChargeArcs, DropMarkers, TrapMarkers, BubbleFx, TestMarkers, DistanceMarkers, MARKER_COLOR_NAMES, MARKER_DISTANCES, initSounds, playSlot, playSlotFor, stopSlot, playSound, soundsUpdate, setRemoteAudio, audioStats, slotSource } from './fx'
 import { consent, optOut, paused, setPaused, leaseValid, bare, bareFx, grantConsent, doOptOut } from './net'
 import { idle, setIdle, refetchSettings, cmdQueue, settingsInfo, refusedNote, emit, netUpdate, sendGameEvent, serverState, serverUp, lastErr, netStatus, lastGameError, manifestUpdate, manifestInfo } from './net'
 import { cueKeyFor } from './uiplan'
@@ -164,6 +164,7 @@ export function gamePlaceTrap() {
     }
     sendGameEvent({ ev: 'trap' })
     emit('trap', { sent: true, mode })
+    playSlot('halo.discharge.set') // c30d: the quiet zap of placing the trap
     note(say('trapPlaced'))
     return
   }
@@ -175,6 +176,7 @@ export function gamePlaceTrap() {
   }
   testTrap = { pos: { ...world }, exempt: true }
   emit('trap', { sent: true, mode })
+  playSlot('halo.discharge.set')
   note('Discharge Trap placed (test mode)')
 }
 
@@ -198,7 +200,7 @@ id ${myId.slice(0, 12)}${idReady ? '' : ' (not stable)'}
 pos local (${curMe.x.toFixed(1)}, ${curMe.y.toFixed(1)}, ${curMe.z.toFixed(1)}) world (${(curMe.x + ORIGIN.x).toFixed(1)}, ${(curMe.z + ORIGIN.z).toFixed(1)})
 net ${ns.up ? 'UP' : 'down'} fails=${ns.failCount} ${ns.lastErr}
 ${skyText}
-${round}   keys: 1 red ${cd('red')}  2 pink ${cd('pink')}  3 dead-zone ${warnings.deadZoneEnabled ? 'ON' : 'off'} ${cd('white')}  4 plumes ${left}   E trap ${hasTrap ? 'DOWN' : 'ready'}   boost ${boostLeft > 0 ? boostLeft.toFixed(0) + 's' : '-'}${trapLeft > 0 ? '   TRAPPED ' + trapLeft.toFixed(0) + 's' : ''}   ${lastEventNote}`
+${round}   keys: ${feature('arrows') ? `1 red ${cd('red')}  2 pink ${cd('pink')}  3 dead-zone ${warnings.deadZoneEnabled ? 'ON' : 'off'} ${cd('white')}  ` : ''}4 plumes ${left}   E trap ${hasTrap ? 'DOWN' : 'ready'}   boost ${boostLeft > 0 ? boostLeft.toFixed(0) + 's' : '-'}${trapLeft > 0 ? '   TRAPPED ' + trapLeft.toFixed(0) + 's' : ''}   ${lastEventNote}`
 }
 
 
@@ -292,7 +294,7 @@ export function gameUpdate(dt: number, me: Vec, speed: number, airborne: boolean
         testDropsGone.set(d.id as string, testClock + 30)
         testBoostUntil = testClock + RULES.boostSeconds // a Halo boost applies the moment it is picked up
         playSlot('halo.upgrade_pickup')
-        playSlot('halo.boost_on')
+        playSlotFor('halo.boost_on', RULES.boostSeconds) // c30d: stops when the boost ends
         emit('pickup', { id: d.id, mode })
         note('Halo boost: ' + RULES.boostSeconds + ' s')
       }
@@ -342,22 +344,21 @@ export function gameUpdate(dt: number, me: Vec, speed: number, airborne: boolean
   // ---- warnings (automatic) ----
   const dz = mode === 'server' ? serverState?.deadzone ?? null : testDeadZoneDistance(world)
   const dzDist: number | null = dz ? dz.dist : null
-  if (feature('deadzoneWarn') && feature('arrows') && warnings.deadZone(arrows.runs.white.ch, clock, speed, dzDist)) {
-    arrows.runs.white.target = () => {
+  if (feature('deadzoneWarn') && warnings.deadZone(arrows.runs.white.ch, clock, speed, dzDist)) { // c31: the warning (voice + note) runs with the arrows off; only the white arrow needs them
+    if (feature('arrows')) arrows.runs.white.target = () => {
       const q = mode === 'server' ? serverState?.deadzone : testDeadZoneDistance(toWorld(curMe))
       if (!q) return null
       return mode === 'server' ? { x: world.x + q.dx, y: world.y, z: world.z + q.dz } : q.at
     }
-    arrows.runs.white.mode = 'arrow'
+    if (feature('arrows')) arrows.runs.white.mode = 'arrow'
     playSlot('warn.deadzone')
     emit('warning', { kind: 'dead-zone', dist: dzDist, speed, triggerAt: Math.max(RULES.deadZoneBaseMetres, speed * RULES.deadZoneSeconds) })
     note('WARNING: approaching dead zone')
   }
   const drops = dropList()
-  const up = feature('arrows') ? warnings.upgradeNearby(arrows.runs.pink.ch, clock, world, drops) : null
+  const up = warnings.upgradeNearby(arrows.runs.pink.ch, clock, world, drops) // c31: the upgrade warning (voice + note) runs with the arrows off; only the pink arrow needs them
   if (up) {
-    arrows.runs.pink.target = () => livePos(up)
-    arrows.runs.pink.mode = 'arrow'
+    if (feature('arrows')) { arrows.runs.pink.target = () => livePos(up); arrows.runs.pink.mode = 'arrow' }
     playSlot('warn.upgrade')
     emit('warning', { kind: 'upgrade-nearby', id: up.id, dist: dist(world, up.pos) })
     note('WARNING: upgrade available')
@@ -489,7 +490,7 @@ function keyPink(world: Vec) {
   }
 }
 function keyDeadZone() {
-  if (!feature('deadzoneWarn')) return
+  if (!feature('deadzoneWarn') || !feature('arrows')) return // c30f: key 3 does nothing while the arrows are off (its warning rides on the white arrow)
   const on = warnings.toggleDeadZone()
   emit('dead-zone-warnings', { on })
   note(`dead-zone warnings ${on ? 'ON' : 'OFF'}`)
@@ -530,6 +531,7 @@ function syncTraps(me: Vec, world: Vec) {
       testTrap = null
       note('Discharge Trap hit you: one level down for ' + RULES.trapSeconds + ' s')
       emit('trap-hit', { mode, self: true })
+      playSlot('halo.discharge.trigger')
     }
   }
   trapMarks.update(clock, testTrap ? [{ id: 'test', pos: toLocal(testTrap.pos), mine: true }] : [])
@@ -627,13 +629,11 @@ function bareFxUpdate(world: Vec, me: Vec) {
     if (!lookFx.has('rp-g')) lookFx.effect('E11', toLocal(rp.helpers), clock, { seconds: rp.left + 1, winner: 'helpers' }, 'rp-g')
   } else if (lookFx.has('rp-h') || lookFx.has('rp-g')) { lookFx.remove('rp-h'); lookFx.remove('rp-g') }
 }
-// c30d: replay.tick once per second of the replay countdown (10 times for 10 s); the end time is kept locally and re-synced when the server's count runs ahead
-let replayEnd = 0, replayN = 0
+// c30d: replay.tick is ONE recording (Forces): played once when the replay countdown starts, stopped when the replay portals close
+let replayOn = false
 function replayTick(left: number | null) {
-  if (left === null) { replayEnd = 0; replayN = 0; return }
-  if (replayEnd === 0 || clock + left < replayEnd - 1) { replayEnd = clock + left; replayN = Math.ceil(left) + 1 }
-  const n = Math.ceil(replayEnd - clock)
-  if (n >= 1 && n < replayN) { replayN = n; playSlot('replay.tick') }
+  if (left === null) { if (replayOn) { replayOn = false; stopSlot('replay.tick') } return }
+  if (!replayOn) { replayOn = true; playSlotFor('replay.tick', left + 1) }
 }
 let trailRoom = 0
 const bubbleEmitters = () => bubs.reduce((a, b) => a + b.b.n, 0)
@@ -880,14 +880,14 @@ function handleServerEvent(ev: any) {
     case 'charge-failed': note('charge failed'); playSlot('charge.failed'); break
     case 'charge-broken': note('charge broken by the other side'); playSlot('charge.broken'); break
     case 'stage': note(`Synth ${ev.stage} mode`); playSlot(ev.stage === 'repair' ? 'charge.repair' : ev.stage === 'upgrade' ? 'charge.upgrade' : 'charge.reset'); break
-    case 'pickup': playSlot('halo.upgrade_pickup'); note(ev.kind === 'boost' ? 'Halo boost: 30 s (applied now)' : `picked up ${ev.kind}`); break
+    case 'pickup': playSlot('halo.upgrade_pickup'); if (ev.kind === 'boost') playSlotFor('halo.boost_on', Math.max(1, Math.min(120, num2(ev.seconds, RULES.boostSeconds)))) /* c30d: the boost sound, until the boost ends */; note(ev.kind === 'boost' ? 'Halo boost: 30 s (applied now)' : `picked up ${ev.kind}`); break
     case 'lobby': cue('lobby'); lobbyNote = `LOBBY: everyone into the bubble (${Math.round(ev.seconds)} s)`; note(say('lobbyCall')); playSlot('warn.upgrade'); break
     case 'lobby-end': lobbyNote = ''; note(say('lobbyEnd', { mode: ev.mode, count: ev.count })); break // c30: PP1 comes as its own event; the E6 burst plays with the blast
     case 'lobby-wait': lobbyNote = 'waiting for the next lobby'; note('the game started without you: you wait for the next lobby'); break
     case 'teleport': serverTeleport(ev); break
     case 'blast': runCommand({ ...ev, c: 'blast', mix: 1 }); break
     case 'toss': runCommand({ c: 'lift', altitude: Number(ev.altitude) || 100 }); traceReport('toss-event', { round: ev.round, altitude: ev.altitude }); break
-    case 'trap-hit': playSlot('warn.upgrade'); note(ev.synth ? 'Discharge Trap hit the Synth' : 'Discharge Trap went off'); emit('trap-hit', { x: ev.x, z: ev.z, synth: ev.synth, players: ev.players }); break
+    case 'trap-hit': playSlot('halo.discharge.trigger'); note(ev.synth ? 'Discharge Trap hit the Synth' : 'Discharge Trap went off'); emit('trap-hit', { x: ev.x, z: ev.z, synth: ev.synth, players: ev.players }); break
     case 'double-agent': note('you were recruited as a double agent'); playSlot('role.double_agent'); break
   }
 }
@@ -918,13 +918,14 @@ function portalEvent(ev: any) {
   const secs = Math.max(1, Math.min(60, num2(ev.seconds, 5)))
   if (ev.v === 2) lookFx.effect('E11', at, clock, { seconds: secs, winner: ev.side === 'helpers' ? 'helpers' : 'hunters' }, 'pp2') // PP2 in the winner's colour
   else lookFx.effect('E7', at, clock, { seconds: secs + 0.5 }, 'pp1') // PP1
-  playSlot('cine.rift.open')
+  playSlotFor('cine.rift.open', ev.v === 2 ? secs : secs + 0.5) // c30d: the hum stops when the portal closes
   note(ev.v === 2 ? 'the Synth is gone into the portal: ' + (ev.side === 'helpers' ? 'helpers win' : 'hunters win') : 'the Synth steps into the portal: the blast follows')
 }
 function glimpseSignal(ev: any) {
   const at = evPos(ev); if (!at || !feature('particles')) return
-  lookFx.effect('E12', at, clock, { seconds: Math.max(1, Math.min(30, num2(ev.seconds, 7))) }, 'glimpse') // the Synth's NEW starting spot: a pale-cyan column to max height
-  playSlot('glimpse.signal') // c30d: its own slot (was the spare cine.rift.snap)
+  const gsecs = Math.max(1, Math.min(30, num2(ev.seconds, 7)))
+  lookFx.effect('E12', at, clock, { seconds: gsecs }, 'glimpse') // the Synth's NEW starting spot: a pale-cyan column to max height
+  playSlotFor('glimpse.signal', gsecs) // c30d: stops when the Glimpse ends // c30d: its own slot (was the spare cine.rift.snap)
   emit('glimpse-signal', { seconds: ev.seconds })
 }
 

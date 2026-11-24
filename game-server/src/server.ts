@@ -40,6 +40,7 @@ let callSeq = 0, callUntil = 0, callAt = { x: 0, y: 0, z: 0, radius: 10 }, lastL
 const CHECKS_PER_MIN = 20 // a Halo outside the game checks every 3 s
 const LOGDIR = path.join(ROOT, 'logs')
 const AUDIO_DIR = path.join(ROOT, 'audio')
+const audioHits: { file: string; t: number }[] = [] // c30d: memory only, the last 300 audio file requests (file name and time; no address)
 fs.mkdirSync(LOGDIR, { recursive: true })
 const LOGFILE = path.join(LOGDIR, 'telemetry.jsonl')
 
@@ -242,6 +243,7 @@ const MAX_PLAYERS = Number(process.env.EMANATE_MAX_PLAYERS ?? 64)
         const seg = url.startsWith('/audio/files/') ? decodeSegment(url.slice('/audio/files/'.length)) : null
         const f = seg ? readAudioFile(AUDIO_DIR, seg) : null
         if (!f) return reply({ ok: false, error: 'not found' }, 404)
+        audioHits.push({ file: seg!, t: Date.now() }); if (audioHits.length > 300) audioHits.splice(0, audioHits.length - 300) // c30d: which recording was served when (no address, no player): proof that the Halo fetched it at its moment
         res.writeHead(200, { 'content-type': f.type, 'cache-control': 'public, max-age=300' })
         return void res.end(f.body)
       }
@@ -273,6 +275,7 @@ const MAX_PLAYERS = Number(process.env.EMANATE_MAX_PLAYERS ?? 64)
             return reply({ ok: true, accepted: halo.set(j.set), sv: halo.sv, overrides: halo.overrides })
           }
           case 'rift-config': riftCfg = { ...riftCfg, ...(typeof j.walkMs === 'number' ? { walkMs: j.walkMs } : {}), ...(typeof j.offset === 'number' ? { offset: j.offset } : {}) }; return reply({ ok: true, riftCfg }) // test control: slow the Synth's walk into the Rift (walkMs) or move the oval (offset); {} resets nothing: send the defaults back
+          case 'audio-hits': return reply({ ok: true, hits: audioHits.slice(-(Number(j.n) || 100)) }) // c30d: the audio files served (file name and time only)
           case 'halo-cmd': return reply({ ok: halo.command(String(j.to ?? 'all'), j.command), queued: true }) // a command for one wearer's address or 'all'
           case 'halo-clear': { const n = halo.clearQueues(); airborne.clear(); halo.command('all', { c: 'clear' }); return reply({ ok: true, dropped: n }) } // c29e: the STOP: drop every queued halo command, then queue one `clear` for every wearer (it is the only thing left in the queue)
           case 'halo-idle': halo.idle = j.on !== false; return reply({ ok: true, idle: halo.idle })

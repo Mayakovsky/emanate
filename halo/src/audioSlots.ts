@@ -28,6 +28,8 @@ export const SLOT_TABLE: [string, string | null][] = [
   ['charge.broken', 'overload'],
   ['charge.failed', 'nokey'],
   ['halo.discharge', null],
+  ['halo.discharge.set', null],
+  ['halo.discharge.trigger', null],
   ['halo.plume', 'plume'],
   ['halo.upgrade_pickup', 'upgrade'],
   ['halo.boost_on', 'upgrade'],

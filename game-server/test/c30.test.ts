@@ -272,3 +272,13 @@ test('Directive Y: a round change places the next start near the PP1 spot, even 
   const d = Math.hypot(m.synth.x - spot.x, m.synth.z - spot.z)
   assert.ok(d <= CONFIG.teleportOnFailRadius + 1, `the round 2 start is ${d.toFixed(0)} m from the PP1 spot`)
 })
+
+test('Directive Z fix: the first join in the lobby does not move the Synth (the bubble stands on it), even before the bridge has reported it', () => {
+  const { m, clock } = mk()
+  m.synthSeenAt = 0 // the server has not heard the real Synth yet (a fresh reset)
+  assert.equal(m.state, 'lobby')
+  m.upsertPlayer('a', { pos: at(103, 100) })
+  assert.deepEqual([m.synth.x, m.synth.z], [100, 100], 'the Synth stays where the bubble is')
+  run(m, clock, 30, { a: { x: 103, z: 100 } })
+  assert.equal(m.state, 'playing', 'the lobby ends normally with the player inside')
+})

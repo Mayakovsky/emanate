@@ -6,17 +6,17 @@ import { RULES } from '../src/logic.ts'
 test('defaults are today\'s values', () => {
   assert.equal(POWER.runSpeed, 16.2); assert.equal(POWER.doubleJumpHeight, 9); assert.equal(POWER.speedCap, 24.3)
   assert.equal(RULES.plumeSeconds, 14); assert.equal(RULES.arrowOnSec, 4); assert.equal(TICK.everySec, 0.25)
-  assert.equal(FEATURES.arrows, 1)
+  assert.equal(FEATURES.arrows, 0) // c30f (Directive X item 4): off by default, the server can switch them on
 })
 test('the server overrides numbers, strings and features; unknown keys and wrong types are ignored', () => {
   resetToDefaults()
-  const n = applyRemote({ power: { runSpeed: 20, nope: 5, walkSpeed: 'fast' }, rules: { plumeSeconds: 10 }, features: { arrows: 0 }, text: { plumeSent: 'plume away', newKey: 'x' }, bogus: { a: 1 } })
+  const n = applyRemote({ power: { runSpeed: 20, nope: 5, walkSpeed: 'fast' }, rules: { plumeSeconds: 10 }, features: { arrows: 1 }, text: { plumeSent: 'plume away', newKey: 'x' }, bogus: { a: 1 } })
   assert.equal(n, 5) // runSpeed, plumeSeconds, arrows, plumeSent, newKey
   assert.equal(POWER.runSpeed, 20); assert.equal(POWER.walkSpeed, 5); assert.equal(RULES.plumeSeconds, 10)
-  assert.equal(feature('arrows'), false); assert.equal(feature('plumes'), true)
+  assert.equal(feature('arrows'), true); assert.equal(feature('plumes'), true)
   assert.equal(say('plumeSent'), 'plume away'); assert.equal(say('roundStart', { round: 2 }), 'round 2 started')
   resetToDefaults()
-  assert.equal(POWER.runSpeed, 16.2); assert.equal(feature('arrows'), true); assert.equal(say('plumeSent'), 'plume sent')
+  assert.equal(POWER.runSpeed, 16.2); assert.equal(feature('arrows'), false); assert.equal(say('plumeSent'), 'plume sent')
 })
 test('hard limits keep the halo inside what Decentraland allows whatever the server says', () => {
   resetToDefaults()

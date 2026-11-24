@@ -1,7 +1,7 @@
 // c29 (Plan v2): turns LookPlans (look.ts) into ParticleSystem entities, keeps the live caps (oldest effect dropped first), and is the one kill switch.
 // Also holds the thin classes game.ts uses for every effect (plume, charge arcs, drop, trap, lobby bubble, burst, rift strike, aurora, endgame,
 // glimpse, blast bubble, trail): each one only decides WHEN and WHERE; WHAT it looks like is in look.ts (recipes as data).
-import { engine, Transform, ParticleSystem, type Entity } from '@dcl/sdk/ecs'
+import { engine, Transform, ParticleSystem, MeshRenderer, Material, type Entity } from '@dcl/sdk/ecs'
 import { Vector3, Quaternion, Color4 } from '@dcl/sdk/math'
 import { type EmitterSpec, type LookPlan, type LookData, type RGBA, LCAP, liveParticles, dropCount, capsOf, planEffect, planBubble, spherePoints, emit, clampEmitter, defined, tweakFor, bubbleEmitterCount, BLAST_LOOK, COLORS_NEW, cycleColor } from './look'
 import { type Vec } from './logic'
@@ -122,19 +122,62 @@ export class Plumes {
   keepOnly(ids: Set<number | string>) { lookFx.keepOnly('plume:', new Set([...ids].map((i) => 'plume:' + i))) }
   update(_now: number) { /* the particle system runs by itself; lookFx.update ends it */ }
 }
-// ---------------------------------------------------------------- E2 charge arcs: re-planned a few times a second while in range
-const STAGE_COLORS: Record<string, RGBA> = { free: COLORS_NEW.amber, reset: COLORS_NEW.amber, repair: COLORS_NEW.orange, upgrade: COLORS_NEW.orange } // c30: the charge-stage colours are amber and orange
+// ---------------------------------------------------------------- E2 charge arcs (c30f, Directive X item 2)
+// The ORIGINAL placeholder arcs (c24i, before c29): 7 stretched boxes from the halo to the Synth, jittered 20 times a second, a saturated
+// unlit colour per charge stage with a thin bright core, "skinned" with the E2 recipe (very small fire and crackle along the same line).
+// They show whenever the wearer is within 5 m of the Synth (the charge radius).
+const STAGE_COLORS: Record<string, RGBA> = { free: COLORS_NEW.amber, reset: COLORS_NEW.amber, repair: COLORS_NEW.orange, upgrade: COLORS_NEW.orange } // the fire skin
+const BOX_COLORS: Record<string, Color4> = { free: Color4.create(0.1, 0.25, 1, 1), reset: Color4.create(1, 0.75, 0.0, 1), repair: Color4.create(1, 0.3, 0.0, 1), upgrade: Color4.create(0.55, 0.1, 1, 1) }
+const ARC_SEGS = 7
+const ARC_HIDDEN = Vector3.create(0, 0, 0)
 export class ChargeArcs {
   private last = -9
   private clk = 0
-  hide() { lookFx.remove('arcs') }
+  private tick = 0
+  private jitter: number[] = []
+  private segs: Entity[] = []
+  private cores: Entity[] = []
+  shown = false // for tests and the HUD
+  private ensure() {
+    if (this.segs.length) return
+    for (let i = 0; i < ARC_SEGS; i++) {
+      const e = engine.addEntity(); Transform.create(e, { position: ARC_HIDDEN, scale: ARC_HIDDEN }); MeshRenderer.setBox(e); Material.setBasicMaterial(e, { diffuseColor: BOX_COLORS.free }); this.segs.push(e)
+      const c = engine.addEntity(); Transform.create(c, { position: ARC_HIDDEN, scale: ARC_HIDDEN }); MeshRenderer.setBox(c); Material.setBasicMaterial(c, { diffuseColor: Color4.create(1, 1, 0.9, 1) }); this.cores.push(c)
+    }
+  }
+  hide() {
+    if (this.shown) { for (const e of this.segs) Transform.getMutable(e).scale = ARC_HIDDEN; for (const e of this.cores) Transform.getMutable(e).scale = ARC_HIDDEN }
+    this.shown = false
+    lookFx.remove('arcs')
+  }
   update(dt: number, me: Vec, synth: Vec | null, stage: string) {
     this.clk += dt
     const inRange = !!synth && Math.hypot(me.x - synth.x, me.z - synth.z) <= 5
     if (!inRange) { this.hide(); return }
+    this.ensure(); this.shown = true
+    this.tick += dt
+    if (this.tick > 0.05 || this.jitter.length === 0) { this.tick = 0; this.jitter = Array.from({ length: ARC_SEGS + 1 }, () => (Math.random() - 0.5) * 0.9) }
+    const col = BOX_COLORS[stage] ?? BOX_COLORS.free
+    const a = Vector3.create(me.x, me.y + 1.9, me.z) // the halo
+    const b = Vector3.create(synth!.x, synth!.y + 1, synth!.z)
+    const pts: Vector3[] = []
+    for (let i = 0; i <= ARC_SEGS; i++) {
+      const f = i / ARC_SEGS, end = i === 0 || i === ARC_SEGS, j = end ? 0 : this.jitter[i]!
+      pts.push(Vector3.create(a.x + (b.x - a.x) * f + j, a.y + (b.y - a.y) * f + (end ? 0 : this.jitter[(i + 3) % (ARC_SEGS + 1)]! * 0.6), a.z + (b.z - a.z) * f - j))
+    }
+    for (let i = 0; i < ARC_SEGS; i++) {
+      const p = pts[i]!, q = pts[i + 1]!
+      const mid = Vector3.create((p.x + q.x) / 2, (p.y + q.y) / 2, (p.z + q.z) / 2)
+      const dir = Vector3.subtract(q, p), len = Vector3.length(dir)
+      const t = Transform.getMutable(this.segs[i]!)
+      t.position = mid; t.rotation = Quaternion.lookRotation(Vector3.normalize(dir)); t.scale = Vector3.create(0.16, 0.16, Math.max(0.05, len))
+      Material.setBasicMaterial(this.segs[i]!, { diffuseColor: col })
+      const ct = Transform.getMutable(this.cores[i]!)
+      ct.position = mid; ct.rotation = t.rotation; ct.scale = Vector3.create(0.05, 0.05, Math.max(0.05, len) * 1.02) // the bright core
+    }
     if (this.clk - this.last < 0.3) return
     this.last = this.clk
-    lookFx.effect('E2', me, this.clk, { to: [synth!.x - me.x, synth!.y - me.y, synth!.z - me.z], color: STAGE_COLORS[stage] ?? STAGE_COLORS.free }, 'arcs')
+    lookFx.effect('E2', me, this.clk, { to: [synth!.x - me.x, synth!.y - me.y, synth!.z - me.z], color: STAGE_COLORS[stage] ?? STAGE_COLORS.free }, 'arcs') // the fire skin
   }
 }
 // ---------------------------------------------------------------- E3 upgrade drop

@@ -357,7 +357,7 @@ export class Match {
       this.players.set(id, p)
       if (this.cfg.choiceDialogue && !this.choices.has(id) && !saved) this.choices.set(id, { step: 'pitch', real: null, secretA: this.d.rng() < 0.5 ? 'hunters' : 'helpers' })
       this.note('join', { id, side: p.side })
-      if (this.players.size === 1 && this.synthSeenAt === 0) this.placeSynthNear(data.pos, this.cfg.synthStartDistance)
+      if (this.players.size === 1 && this.synthSeenAt === 0 && this.state !== 'lobby') this.placeSynthNear(data.pos, this.cfg.synthStartDistance) // Directive Z fix: never in the lobby (the bubble stands on the Synth: moving it 100 m away left the joined player outside and the lobby extended for ever)
     }
     p.pos = data.pos
     p.speed = data.speed ?? p.speed

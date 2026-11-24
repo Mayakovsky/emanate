@@ -65,7 +65,10 @@ test('c30b: the busiest moment (round-start blast + burst + Glimpse + trails + P
 test('c30b: smoke is black and dense everywhere except the two locked looks; flames start at 0.9 opacity', () => {
   assert.ok(MATERIALS.smoke.from[0] <= 0.05 && MATERIALS.smoke.from[3] >= 0.9 && MATERIALS.smoke.to[3] >= 0.5)
   assert.equal(MATERIALS.fire.from[3], 0.9)
-  for (const id of ['E1', 'E3', 'E7', 'E11', 'E14']) { const w = plan(id).emitters.filter((e) => e.tex === 'wisp'); assert.ok(w.length && w.every(black), id) }
+  for (const id of ['E1', 'E7', 'E11', 'E14']) { const w = plan(id).emitters.filter((e) => e.tex === 'wisp'); assert.ok(w.length && w.every(black), id) }
+  // c30f (Directive X item 3, baked): the Upgrade Drop's smoke is pink at the base and fades to very pale pink at the top
+  { const w = plan('E3').emitters.filter((e) => e.tex === 'wisp').sort((x, y) => x.pos[1] - y.pos[1]); assert.equal(w.length, 2)
+    assert.ok(w[0]!.from[0] > 0.9 && w[0]!.from[1] < 0.5 && w[0]!.from[2] > 0.6, 'pink base'); assert.ok(w[1]!.to[1] > 0.85 && w[1]!.to[2] > 0.9, 'very pale pink top') }
   assert.ok(plan('E12').emitters.some((e) => e.tex === 'wisp' && e.from[2] > 0.9)) // the Glimpse stays pastel blue
 })
 

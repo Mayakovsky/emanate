@@ -6,7 +6,7 @@
 import { RULES } from './logic'
 
 export const PROTOCOL_VERSION = 1 // the command vocabulary and settings schema this halo understands
-export const BUILD_ID = 'c30d' // the halo build (set at release; the server logs it and may refuse an old one)
+export const BUILD_ID = 'c31' // the halo build (set at release; the server logs it and may refuse an old one)
 
 // ---- the powers (index.ts) ----
 export const POWER = {
@@ -30,7 +30,7 @@ export const FXS = {
 // radius: the planned landing is inside this many metres of the centre; gravity: the Halo's model of the fall (calibrated on the client); apexMin/apexMax: launch height range (m); maxFy/maxFh: force ceilings; vMax: highest horizontal speed planned; bounds: the map half-size the plan stays inside
 export const BLAST = { radius: 500, gravity: 10, riseGravity: 40, apexMin: 80, apexMax: 240, maxFy: 60, maxFh: 60, kv: 6, vMax: 110, bounds: 2400, scale: 1, hold: 1, flashSeconds: 0.25, flashStrength: 0.7, bubbleRadius: 110, bubbleSeconds: 2.5, bubbleHold: 3, bubbleImplode: 1, bubbleAlpha: 0.75, rethrowCooldown: 6, callCooldown: 120, callRange: 800, cannon: 1, steer: 60, steerK: 4, steerEase: 60, vyMax: 150, gain: 1, burst: 0.15, speed: 110, rangeA: 400, rangeK: 1, elevMin: 40, elevMax: 89 }
 // ---- features: 1 on, 0 off ----
-export const FEATURES = { calls: 1, arrows: 1, plumes: 1, trap: 1, deadzoneWarn: 1, cinematics: 1, bubbleFx: 1, sounds: 1, debugPanel: 1, powers: 1, notes: 1, activeLine: 1, particles: 1, cues: 1, callNear: 0, blastBurst: 1 }
+export const FEATURES = { calls: 1, arrows: 0 /* c30f (Directive X item 4): arrows off by default, the code stays; the server can switch them back on */, plumes: 1, trap: 1, deadzoneWarn: 1, cinematics: 1, bubbleFx: 1, sounds: 1, debugPanel: 1, powers: 1, notes: 1, activeLine: 1, particles: 1, cues: 1, callNear: 0, blastBurst: 1 }
 // ---- text (HUD notes and the always-on line) ----
 export const TEXT: Record<string, string> = {
   activeLine: 'EMANATE halo active: sends your position to emanate.hiddenforces.net (see /privacy)',
@@ -46,7 +46,7 @@ export const TEXT: Record<string, string> = {
   lobbyEnd: 'the bubble blows: {mode} with {count}',
   // c24i: stage cues, one or two short plain lines each; the server may change or blank any of them (blank = no cue for that stage)
   cueLobby: 'Step into the glowing bubble around the Synth to join.',
-  cueRound: 'Chase the Synth and run into it.' + String.fromCharCode(10) + 'Press 1 for an arrow to it when it is far. Press 4 for a red smoke plume. Press E to set a trap.',
+  cueRound: 'Chase the Synth and run into it.' + String.fromCharCode(10) + 'Press 4 for a smoke plume. Press E to set a trap.', // c30f: no arrow keys (arrows off)
   callPrompt: 'The Synth is calling.'+String.fromCharCode(10)+'Step into the red portal and hold E to join.',
   cueEnding: 'Walk into a portal to pick your side.' + String.fromCharCode(10) + 'The game starts again when the countdown ends.'
 }

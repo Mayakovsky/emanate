@@ -19,8 +19,8 @@ export const COLORS: Record<ArrowKind, Color4> = {
 const HIDDEN = Vector3.create(0, 0, 0)
 
 // ---------------- sounds: audio slots (see EMANATE-AUDIO-LIST.md) ----------------
-// A slot plays, in order: (1) the server's recording, if the manifest lists one and the halo can reach the server;
-// (2) a recording packed into the zip (audioPacked.ts); (3) a generated placeholder tone. No downloaded audio.
+// A slot plays, in order (c30f): (1) a recording packed into the zip (audioPacked.ts); (2) the server's recording (it does not play in the
+// client as of 23 Nov: kept for a future client); (3) a generated placeholder tone. No downloaded audio.
 const TONE_NAMES = ['deadzone', 'upgrade', 'overload', 'plume', 'warn5', 'charge', 'nokey', 'escape', 'contain', 'crackle'] as const
 export type SoundName = (typeof TONE_NAMES)[number]
 const toneEntities = new Map<string, Entity>()
@@ -74,8 +74,11 @@ export function setRemoteAudio(map: Record<string, string>) {
 }
 // which source a slot would use right now
 export function slotSource(id: string): 'server' | 'packed' | 'tone' | 'silent' {
-  if (remoteAudio[id]) return 'server'
+  // c30f: the packed file comes FIRST. A wearable's AudioSource does not load a clip from a web address (23 Nov: the client never fetched a
+  // server file, the recording stayed silent), so a server recording is used only for a slot with nothing packed. The server's remap (SOUNDS)
+  // still points any moment at any packed slot, and that stays changeable after the Mint Lock.
   if (PACKED[id]) return 'packed'
+  if (remoteAudio[id]) return 'server'
   return toneOf.get(id) ? 'tone' : 'silent'
 }
 export function playSlot(id0: string) {
@@ -102,6 +105,21 @@ export function playSlot(id0: string) {
   AudioSource.getMutable(e).playing = false
   armed.add(key + '|' + id)
 }
+// c30d (Forces's long recordings): stop a slot when its moment ends instead of playing the whole file (a loop slot would otherwise never stop)
+const stopAt = new Map<string, number>() // resolved slot id -> Date.now() deadline
+function resolveSlot(id0: string) { const id = SOUNDS[id0] ?? id0; return id === '' || id.startsWith('lib:') ? null : id }
+export function stopSlot(id0: string) {
+  const id = resolveSlot(id0); if (!id) return
+  stopAt.delete(id)
+  for (const k of [...armed]) if (k.endsWith('|' + id) && k.startsWith('s:')) armed.delete(k)
+  const e = slotEntities.get(id); if (e) AudioSource.getMutable(e).playing = false
+}
+/** play a slot and stop it after `seconds` (its moment's length) */
+export function playSlotFor(id0: string, seconds: number) {
+  playSlot(id0)
+  const id = resolveSlot(id0); if (!id || !(seconds > 0)) return
+  stopAt.set(id, Date.now() + Math.min(120, seconds) * 1000)
+}
 // old call sites: a placeholder tone by name
 export function playSound(n: SoundName) {
   const e = toneEntities.get(n)
@@ -110,6 +128,7 @@ export function playSound(n: SoundName) {
   armed.add('t:' + n + '|' + n)
 }
 export function soundsUpdate() {
+  if (stopAt.size) { const now = Date.now(); for (const [id, t] of [...stopAt]) if (now >= t) stopSlot(id) }
   for (const n of libArmed) { const e = libEntities.get(n); if (e) AudioSource.getMutable(e).playing = true }
   libArmed.clear()
   if (armed.size === 0) return

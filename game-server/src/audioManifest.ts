@@ -53,7 +53,9 @@ export const SLOTS: Slot[] = [
   S('charge.broken', 'Round and charge', 'The opposing side breaks the charge', '', 'An opposing player arrives while a charge is under way', 'overload', 2),
   S('charge.failed', 'Round and charge', 'The 10 s window ran out; the Synth is moved', '', 'No further contact within 10 s', 'nokey', 2),
   // ---- the halo ----
-  S('halo.discharge', 'Halo', 'Discharge trap (not built yet)', '', 'A player uses the discharge trap', null, 2),
+  S('halo.discharge', 'Halo', 'Discharge trap (old single slot; c30d uses the two below)', '', 'Not played since c30d', null, 2),
+  S('halo.discharge.set', 'Halo', 'The Discharge Trap is placed: a quiet zap', '', 'Key E places a trap', null, 1.5),
+  S('halo.discharge.trigger', 'Halo', 'The Discharge Trap goes off: a loud zap', '', 'The Synth or a player walks into a trap', null, 1.5),
   S('halo.plume', 'Halo', 'A plume is launched', '', 'Key 4', 'plume', 2),
   S('halo.upgrade_pickup', 'Halo', 'An upgrade is picked up', '', 'Walking within 2 m of a drop', 'upgrade', 2),
   S('halo.boost_on', 'Halo', 'Halo boost starts (next power level, 30 s)', '', 'Using a Halo boost (key E)', 'upgrade', 2),
@@ -78,7 +80,7 @@ export const SLOTS: Slot[] = [
   S('end.portal.escape.line', 'The ending', 'The Synth, to the players, as they fly through the yellow portal', 'Follow me.', 'Ending 1: the players follow the Synth', 'escape', 3),
   S('end.portal.contain.line', 'The ending', 'The Synth, as it is pulled into the purple portal', 'Please no!', 'Ending 2: all players arrive', 'contain', 3),
   S('end.portal.contain.pull', 'The ending', 'The Synth is sucked into the portal and disappears', '', 'Ending 2, after the line', null, 4),
-  S('replay.tick', 'The ending', 'One tick of the replay countdown (walk into a portal to pick your side)', '', 'Each second of the 10 s replay countdown: 10 times', null, 0.2)
+  S('replay.tick', 'The ending', "The replay countdown: one recording (Forces's), played once (walk into a portal to pick your side)", '', 'Once when the 10 s replay countdown starts; stopped when the portals close', null, 15)
 ]
 
 /** The file a slot is recorded to. */
