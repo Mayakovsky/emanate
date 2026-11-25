@@ -1,10 +1,10 @@
-# Emanate (GDD)
+# Ghostcode (GDD)
 
 **Decentraland Creator Success Program**
 
 | | |
 |---|---|
-| Public experience title | Emanate (working title; the final title is not chosen) — IP & [Content Policy](https://decentraland.org/content/) status: owner declaration: Hidden Forces (the studio, signed by its sole developer); name screening: not searched; unresolved: audio is not yet sourced (public-domain sources only, after the first test build), title not screened |
+| Public experience title | Ghostcode (the final title, chosen 25 Nov 2026; earlier working title: Emanate) — IP & [Content Policy](https://decentraland.org/content/) status: owner declaration: Hidden Forces (the studio, signed by its sole developer); name screening: not searched; unresolved: audio is not yet sourced (public-domain sources only, after the first test build), title not screened |
 | Deployment target | Genesis City (the chase is played across the whole map). The game does not live in a World. A private World named "Synth World" is a planned test arena: it is not built yet and its name is not registered |
 | Studio / team name | Hidden Forces |
 | Date | 2026-11-17 |
@@ -130,7 +130,7 @@ Play modes, chosen by how many players stand in the Synth's bubble when the join
 
 ## 6. Mobile-First
 
-Emanate is built for desktop first and mobile alongside as far as possible. Smart wearables do not run on mobile yet, so the halo, the arrows and the powers are desktop-only for now. A mobile player can talk to the Synth but gets an in-character "you cannot help me yet". This does not meet the program's mobile-first requirement today; see below.
+Ghostcode is built for desktop first and mobile alongside as far as possible. Smart wearables do not run on mobile yet, so the halo, the arrows and the powers are desktop-only for now. A mobile player can talk to the Synth but gets an in-character "you cannot help me yet". This does not meet the program's mobile-first requirement today; see below.
 
 | Core-loop verb | How it works with touch controls |
 |---|---|

@@ -1,4 +1,4 @@
-# The Emanate halo protocol (halo candidate `c23a`, protocol 1)
+# The Ghostcode halo protocol (halo candidate `c23a`, protocol 1)
 
 The halo is a **thin client**: only the asset set (code, model, sounds) and the command vocabulary are frozen when the item is published; the numbers, texts, sound mapping, effect parameters and feature switches come from the server. This file is the contract. Everything below is implemented in `halo-build04\src\settings.ts` (halo) and `game-server\src\halocontrol.ts` (server); the tests are `halo-build04\test\settings.test.ts` and `game-server\test\halocontrol.test.ts`.
 

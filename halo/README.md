@@ -1,4 +1,4 @@
-# Emanate halo
+# Ghostcode halo
 
 The halo is a Decentraland **smart wearable** (`top_head` slot, SDK7). Its 3D model is a low-poly ring; its code runs on each player's own computer and gives the movement powers: Normal, then Sprint, Jump (double jump, glide) and Fly. The game server sets the tier. `E` places a Discharge Trap.
 

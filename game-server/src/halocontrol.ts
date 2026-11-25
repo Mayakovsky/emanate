@@ -15,7 +15,7 @@ export class HaloControl {
   overrides: Record<string, Record<string, string | number>> = {}
   sv = 0
   idle = false
-  policy: HaloPolicy = { minPv: 0, message: 'This Emanate halo is out of date.' }
+  policy: HaloPolicy = { minPv: 0, message: 'This Ghostcode halo is out of date.' }
   private queues = new Map<string, Record<string, unknown>[]>()
   versions = new Map<string, number>() // "build/pv" -> number of ticks seen (no addresses)
   sawPlayers = new Set<string>() // for the broadcast: who is connected

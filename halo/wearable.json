@@ -1,13 +1,13 @@
 {
   "id": "b4cacbf1-13a8-4a9b-b1e6-4bcd2e4c8224",
-  "name": "Emanate Halo",
-  "description": "Emanate movement powers. It sends your position to its server.",
+  "name": "Ghostcode Halo",
+  "description": "Ghostcode movement powers. It sends your position to its server.",
   "rarity": "common",
   "data": {
     "replaces": [],
     "hides": [],
     "tags": [
-      "emanate",
+      "ghostcode",
       "halo",
       "game"
     ],

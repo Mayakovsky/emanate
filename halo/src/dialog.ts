@@ -77,7 +77,7 @@ export function dialogUi() {
       )
     }
     case 'info':
-      return panel(dialog.title || 'EMANATE', dialog.body, [])
+      return panel(dialog.title || 'GHOSTCODE', dialog.body, [])
     default:
       return null
   }

@@ -229,7 +229,7 @@ function gateUpdate(dt: number, world: Vec) {
   const shift = inputSystem.isPressed(InputAction.IA_MODIFIER)
   const e = inputSystem.isPressed(InputAction.IA_PRIMARY)
   if (!optOut) {
-    if (ctrl && shift && e) { setPaused(true); optHold += dt; if (optHold >= 3) { doOptOut(); note('Emanate is off. Take the halo off and put it on again to start again.') } } else { optHold = 0; if (paused) setPaused(false) } // c26: held = paused at once; released before 3 s = resumes (if consent and the lease still hold); 3 s = permanent
+    if (ctrl && shift && e) { setPaused(true); optHold += dt; if (optHold >= 3) { doOptOut(); note('Ghostcode is off. Take the halo off and put it on again to start again.') } } else { optHold = 0; if (paused) setPaused(false) } // c26: held = paused at once; released before 3 s = resumes (if consent and the lease still hold); 3 s = permanent
   }
   // c27 (Directive M): the wearer's own re-throw: HOLD Ctrl + E for 1.5 s, only joined + leased + a running match, with a cooldown; no server value can fire it
   if (!optOut && !paused && ctrl && !shift && e && joinedAndLeased() && matchState() === 'playing') {
@@ -940,7 +940,7 @@ function glimpseSignal(ev: any) {
 
 // ---------------- round 8: the Synth's pitch dialogue (c30: the replay menu, the timeout glimpse and the final cinematic are gone) ----------------
 function toast(body: string, seconds = 4) {
-  openDialog('info', clock, () => {}, { title: 'EMANATE (test)', body })
+  openDialog('info', clock, () => {}, { title: 'GHOSTCODE (test)', body })
   toastUntil = clock + seconds
 }
 let toastUntil = 0

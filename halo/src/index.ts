@@ -167,7 +167,7 @@ function halo(dt: number) {
   if (idle || !feature('powers') || !powersAllowed()) { // c26: no consent / no lease / opt-out: the stock avatar
     // idle (the server's kill switch) or the powers switched off: the client's own locomotion, no forces
     if (tier !== 0) setTier(0)
-    hudText = 'EMANATE halo: stock avatar (' + (idle ? 'off' : powersAllowed() ? 'on' : 'not joined, paused or lease ended') + '), build ' + BUILD_ID // c27: the panel must not show the last powered frame while the wearer is stock
+    hudText = 'GHOSTCODE halo: stock avatar (' + (idle ? 'off' : powersAllowed() ? 'on' : 'not joined, paused or lease ended') + '), build ' + BUILD_ID // c27: the panel must not show the last powered frame while the wearer is stock
     AvatarLocomotionSettings.deleteFrom(engine.PlayerEntity)
     Physics.removeForceFromPlayer(BOOST_SOURCE)
     Physics.removeForceFromPlayer(BRAKE_SOURCE)
