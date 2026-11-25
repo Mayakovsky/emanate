@@ -87,7 +87,8 @@ export const CONFIG = {
   replayRange: 60, // m from the portals: players this close count as "in range" at the end
   portalOffset: 6, // m: each replay portal stands this far from the middle (side by side)
   portalJoinRadius: 3, // m: walking this close to a replay portal picks that faction
-  maxDrops: 6 // c30: upgrade drops a round creates (all at the round start, shown until collected); the halo draws at most this many
+  maxDrops: 6, // c30: drops a round creates (all at the round start, shown until collected); the halo draws at most this many. c31: upgrades only (boost or signal flare); the world traps are roundTraps, on top
+  roundTraps: 6 // c31 (Forces, mail c67a4eaa): six armed Discharge Traps placed in the world each round BESIDE the maxDrops upgrade drops (0..12), spread on the drop ring away from the Synth's start, the lobby bubble, each other and the drops; removed at the ending and at a lobby. Every Halo draws them as traps; anyone within trapRadius (the Synth included) loses one level for trapSeconds; one use each. 0 = none
 }
 
 export const UNCONFIRMED = [
