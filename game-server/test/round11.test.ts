@@ -144,7 +144,7 @@ test('trap: a Synth at level 0 stays at 0 (min 0)', () => {
   m.setSynth(at(302, 300))
   assert.equal(m.synthLevelNow(), 0)
 })
-test('trap: any player in range drops a level for 10 s, the placer and teammates too, everyone in range at once', () => {
+test('trap: any player in range except the placer drops a level for 10 s, teammates too, everyone in range at once (c31c: never the placer)', () => {
   const { m, clock } = mk('multiplayer')
   join(m, 'h1', 'hunters', at(0, 0)); join(m, 'h2', 'hunters', at(1000, 1000)); join(m, 'p1', 'helpers', at(2000, 2000)); join(m, 'p2', 'helpers', at(3000, 3000))
   m.setSynth(at(-500, -500))
@@ -155,26 +155,36 @@ test('trap: any player in range drops a level for 10 s, the placer and teammates
   // the placer, a teammate (h2) and an opponent (p1) all end up in range before the next check; p2 stays away
   m.players.get('h1')!.pos = at(1, 1); m.players.get('h2')!.pos = at(2, 0); m.players.get('p1')!.pos = at(0, 3)
   m.advance()
-  assert.equal(s('h1').tier, 0) // round 1 tier 1, one down: 0 (normal)
-  assert.equal(s('h2').tier, 0)
+  assert.equal(s('h1').tier, 1) // c31c (Forces): the placer is never hit by their own trap
+  assert.equal(s('h2').tier, 0) // round 1 tier 1, one down: 0 (normal)
   assert.equal(s('p1').tier, 0)
   assert.equal(s('p2').tier, 1) // not in range
   assert.equal(m.traps.length, 0)
   clock.adv(5); for (const id of ['h1', 'h2', 'p1', 'p2']) m.upsertPlayer(id, { pos: at(900 + id.length, 900) })
-  assert.equal(s('h1').tier, 0)
+  assert.equal(s('h2').tier, 0)
   clock.adv(6); for (const id of ['h1', 'h2', 'p1', 'p2']) m.upsertPlayer(id, { pos: at(900 + id.length, 900) })
-  assert.equal(s('h1').tier, 1) // 10 s are over
+  assert.equal(s('h2').tier, 1) // 10 s are over
 })
-test('trap: a player standing in range when it is placed (the placer) is exempt until they step out once', () => {
+test('trap: another player standing in range when it is placed is exempt until they step out once; the placer is never hit (c31c)', () => {
   const { m } = mk('coop')
-  join(m, 'a', 'hunters', at(10, 10))
+  join(m, 'a', 'hunters', at(10, 10)); join(m, 'b', 'hunters', at(11, 10))
   m.setSynth(at(-500, -500))
   m.placeTrap('a', at(10, 10))
-  m.upsertPlayer('a', { pos: at(12, 10) })
-  assert.equal(m.traps.length, 1)
-  m.upsertPlayer('a', { pos: at(40, 10) }) // steps out
-  m.upsertPlayer('a', { pos: at(12, 10) }) // and back
+  m.upsertPlayer('b', { pos: at(12, 10) })
+  assert.equal(m.traps.length, 1) // b was in range when it was placed: exempt
+  m.upsertPlayer('a', { pos: at(40, 10) }); m.upsertPlayer('a', { pos: at(10, 10) }) // the placer steps out and back on it
+  assert.equal(m.traps.length, 1); assert.equal(m.snapshot('a').you!.tier, 1) // nothing happens to the placer
+  m.upsertPlayer('b', { pos: at(40, 10) }) // b steps out
+  m.upsertPlayer('b', { pos: at(12, 10) }) // and back
   assert.equal(m.traps.length, 0)
+})
+test('c31c: a world trap (owner server) still hits anyone', () => {
+  const { m } = mk('solo')
+  join(m, 'a', 'hunters', at(0, 0))
+  m.setSynth(at(-500, -500))
+  m.traps.push({ id: 999, owner: 'server', pos: at(100, 100), born: 0, expires: 1e15, exempt: new Set() } as any)
+  m.upsertPlayer('a', { pos: at(101, 100) })
+  assert.equal(m.traps.length, 0); assert.equal(m.snapshot('a').you!.tier, 0)
 })
 test('trap: a hit lowers a boosted player one level (min 0), and a trap not triggered expires on its own', () => {
   const { m, clock } = mk('solo', { trapLifeSeconds: 30 })
@@ -197,7 +207,7 @@ test('trap hit tells every halo (an event with the position and who was hit)', (
   join(m, 'a', 'hunters'); join(m, 'b', 'hunters')
   m.setSynth(at(-500, -500))
   m.placeTrap('a', at(0, 0))
-  m.upsertPlayer('a', { pos: at(1, 1) })
-  const ev = (m.snapshot('b') as any).events.find((e: any) => e.ev === 'trap-hit')
-  assert.ok(ev && ev.players.includes('a') && ev.synth === false)
+  m.upsertPlayer('b', { pos: at(1, 1) })
+  const ev = (m.snapshot('a') as any).events.find((e: any) => e.ev === 'trap-hit')
+  assert.ok(ev && ev.players.includes('b') && !ev.players.includes('a') && ev.synth === false)
 })

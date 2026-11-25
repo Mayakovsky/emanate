@@ -145,6 +145,7 @@ export class Match {
   private endingSequence(winner: Side) {
     this.state = 'ending'
     this.endgame = null
+    this.clearWorldTraps() // c31: no world trap may stand on PP2 or the replay portals
     const storm = this.cfg.cineFx ? this.cfg.stormSeconds : 0 // c30b (Directive W): the Storm (E10) is off by default: PP2, the Synth goes in, then straight to the replay portals
     const delay = Math.max(0, Math.min(10, Number(this.cfg.replayOpenDelay) || 0)) // c30d: the replay portals wait this long after PP2
     const total = this.cfg.portalSeconds + storm + delay + 1 // PP2 stands until the replay portals open
@@ -232,6 +233,7 @@ export class Match {
   startLobby(at: Vec = this.synth) {
     const now = this.d.now()
     this.state = 'lobby'
+    this.clearWorldTraps() // c31: none inside the lobby bubble
     this.lobbyEndsAt = now + this.cfg.lobbySeconds * 1000
     this.bubble = { x: at.x, y: at.y, z: at.z, radius: this.cfg.bubbleRadius }
     this.called.clear()
@@ -795,14 +797,40 @@ export class Match {
     this.drops = []
     this.dropsMade = 0
     const [lo, hi] = this.cfg.dropSpawnMinMax, now = this.d.now()
-    for (let i = 0; i < Math.max(0, Math.floor(this.cfg.maxDrops)); i++) {
-      const a = this.d.rng() * Math.PI * 2, r = lo + this.d.rng() * (hi - lo)
+    const total = Math.max(0, Math.floor(this.cfg.maxDrops))
+    const ring = () => { const a = this.d.rng() * Math.PI * 2, r = lo + this.d.rng() * (hi - lo); return { x: this.synth.x + Math.cos(a) * r, y: this.synth.y, z: this.synth.z + Math.sin(a) * r } }
+    for (let i = 0; i < total; i++) {
+      const pos = ring()
       const kind: DropKind = this.round <= this.cfg.haloBoostMaxRound && this.d.rng() < 0.6 ? 'boost' : 'plume'
-      this.drops.push({ id: this.nextId++, kind, pos: { x: this.synth.x + Math.cos(a) * r, y: this.synth.y, z: this.synth.z + Math.sin(a) * r }, expires: now + (this.cfg.roundSeconds + 60) * 1000 })
+      this.drops.push({ id: this.nextId++, kind, pos, expires: now + (this.cfg.roundSeconds + 60) * 1000 })
       this.dropsMade++
     }
-    this.note('drops-made', { n: this.dropsMade })
+    const nTraps = this.placeWorldTraps(now)
+    this.note('drops-made', { n: this.dropsMade, traps: nTraps })
   }
+  /** c31 (Forces, mail c67a4eaa): `roundTraps` armed Discharge Traps placed by the server each round, beside the upgrade drops (owner 'server', one use each, the normal
+   *  trap rule: anyone within trapRadius, the Synth included, loses one level for trapSeconds). Spread on the drop ring, never within reach of the Synth's start,
+   *  the lobby bubble, another world trap or an upgrade drop; they are removed when the ending starts (so none stands on PP2 or the replay portals) and at a lobby. */
+  private placeWorldTraps(now: number): number {
+    const want = Math.min(12, Math.max(0, Math.floor(Number(this.cfg.roundTraps) || 0)))
+    const [lo, hi] = this.cfg.dropSpawnMinMax, R = this.cfg.trapRadius
+    const clear = 2 * R + 2 // m between a trap and anything it must not touch (two trigger radii plus a margin)
+    const avoid: { at: Vec; r: number }[] = [{ at: this.synth, r: Math.max(clear, R + 10) }, ...this.drops.map((d) => ({ at: d.pos, r: clear }))]
+    if (this.bubble) avoid.push({ at: this.bubble, r: this.bubble.radius + R + 2 })
+    let placed = 0
+    for (let i = 0; i < want; i++) {
+      for (let tries = 0; tries < 40; tries++) {
+        const a = this.d.rng() * Math.PI * 2, r = lo + this.d.rng() * (hi - lo)
+        const pos = { x: this.synth.x + Math.cos(a) * r, y: this.synth.y, z: this.synth.z + Math.sin(a) * r }
+        if (avoid.some((o) => dist2d(o.at, pos) < o.r)) continue
+        this.traps.push({ id: this.nextId++, owner: 'server', pos, born: now, expires: now + (this.cfg.roundSeconds + 60) * 1000, exempt: new Set() })
+        avoid.push({ at: pos, r: clear }); placed++
+        break
+      }
+    }
+    return placed
+  }
+  private clearWorldTraps() { this.traps = this.traps.filter((t) => t.owner !== 'server') }
   private spawnDrops(now: number) {
     if (this.cfg.cinematics) return // c30: the drops are made once, at the round start
     if (now < this.nextDropAt || this.drops.length >= this.cfg.dropMax) return
@@ -847,11 +875,12 @@ export class Match {
     this.note('trap-placed', { id })
     return true
   }
-  // a trap triggers when the Synth or any player (the placer and teammates too) comes within its radius: everyone in range drops one level for trapSeconds, and the trap is used up
+  // a trap triggers when the Synth or any player other than its placer comes within its radius: everyone in range (never the placer) drops one level for trapSeconds, and the trap is used up.
+  // c31c (Forces, mail 8f1794a3): a trap never hits the player who placed it; it stays armed while only its owner stands on it. World traps (owner 'server') hit anyone, as before
   private checkTraps(now: number) {
     for (const t of [...this.traps]) {
       for (const id of [...t.exempt]) { const q = this.players.get(id); if (!q || dist3d(q.pos, t.pos) > this.cfg.trapRadius) t.exempt.delete(id) }
-      const hit = [...this.players.values()].filter((p) => dist3d(p.pos, t.pos) <= this.cfg.trapRadius && !t.exempt.has(p.id))
+      const hit = [...this.players.values()].filter((p) => p.id !== t.owner && dist3d(p.pos, t.pos) <= this.cfg.trapRadius && !t.exempt.has(p.id))
       const synthHit = dist3d(this.synth, t.pos) <= this.cfg.trapRadius
       if (hit.length === 0 && !synthHit) continue
       for (const p of hit) p.trapUntil = now + this.cfg.trapSeconds * 1000
