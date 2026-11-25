@@ -180,6 +180,9 @@ export function tweakFor(look: LookData | undefined, effect: string, layer: stri
 /** drop undefined keys so a tweak never overrides a default with undefined */
 export const defined = <T extends object>(o: T): Partial<T> => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as Partial<T>
 export const lookOn = (look: LookData | undefined, effect: string) => look?.[`${effect}.on`] !== 0
+/** c31: the Glimpse column's width in m (default 8 = 4 m radius), from the server look key `E12.width`, clamped 2..30 */
+export const GLIMPSE_WIDTH = 5.6 // c31c (Directive AA item 6): 2.8 m radius (5.6 m across), 30 % less than c31's 4 m, so it is less obvious from far; the server key E12.width still tunes it
+export function glimpseWidth(look: LookData | undefined): number { const v = Number(look?.['E12.width']); return look?.['E12.width'] !== undefined && Number.isFinite(v) ? cl(v, 2, 30) : GLIMPSE_WIDTH }
 
 // ---------------------------------------------------------------- the recipes E1..E14 (Directive V, c30), as data + small planners
 export const OPACITY = 0.75 // c30: the blast bubble (E13, kept as it is) is 75 % opaque
@@ -191,6 +194,8 @@ export function stack(m: MaterialName, w: number, y0: number, y1: number, n: num
   const h = (y1 - y0) / Math.max(1, n)
   return Array.from({ length: Math.max(1, n) }, (_, i) => emit(m, [0, y0 + h * (i + 0.5), 0], { kind: 'box', x: w, y: w, z: h }, true, t, group))
 }
+export const FIZZ = { size: 0.018, rate: 30, life: 0.12, color: [1, 0.97, 0.62, 1] as RGBA } // c31c: E2 fizz: glow x 0.018 = 14..25 cm points (popping to x1.8), 300 a second per point, 0.3 s life (the first try at 0.009 / 12 read as a few specks in the client)
+export const DROP_WIDTH = 2.1 // c31c (Directive AA item 7): the Upgrade Drop column, m across (was 3)
 export const SKY_TOP = 200 // m: "max height" for every column (the halo's ceiling)
 const RED: RGBA = [0.95, 0.1, 0.03, 1], GOLD: RGBA = [1, 0.8, 0.25, 1]
 const WHITE_CYAN: RGBA = [0.8, 0.95, 1, 1]
@@ -213,15 +218,18 @@ export function cycleColor(t: number, period = 1.2): RGBA {
 /** Plasma Portal (E7 = PP1, E11 = PP2, E14 = PP3): ONE recipe, three versions that differ only in colour (c30b, Directive W): a three-storey house on fire.
  *  A fire about 10 m across whose flames reach 12 to 15 m (more than six avatars stacked), crackle through it, and black dense smoke stacked from the fire to the sky top.
  *  `c` = the fire / crackle colour; `embers` = gold embers (PP3). 16 emitters (PP3 17). */
+export const FLAME_FINE = { size: 0.6, rate: 2 } // c31c (Directive AA item 8): portal flames 40 % smaller, twice as many
 export const PORTAL_LOOK = { base: 10, flame: 15, smokeFrom: 10, smokeSegs: 6, rim: 6 }
 function plasmaPortal(id: string, look: LookData | undefined, c: RGBA, embers: boolean): EmitterSpec[] {
   const tw = (l: string) => defined(tweakFor(look, id, l)), em: EmitterSpec[] = [], P = PORTAL_LOOK
   const fireEnd: RGBA = [c[0] * 0.5, c[1] * 0.5, c[2] * 0.5, 0.35]
   em.push(...stack('smoke', 9, P.smokeFrom, SKY_TOP, P.smokeSegs, { size: 1, rate: 1, speed: 0.12, ...tw('smoke') }, 1)) // black smoke, fire to sky top
-  em.push(emit('fire', [0, P.flame * 0.27, 0], colBox(P.base, P.flame * 0.55), true, { size: 1.1, rate: 3, speed: 0.6, color: c, colorEnd: fireEnd, ...tw('fire') }, 2)) // the body of the fire
-  em.push(emit('fire', [0, P.flame * 0.72, 0], colBox(P.base * 0.65, P.flame * 0.45), true, { size: 0.9, rate: 2.2, speed: 0.6, color: c, colorEnd: fireEnd, ...tw('fire') }, 2)) // the top: narrower, to 15 m
+  // c31c (Directive AA item 8): finer fire: every flame particle x FLAME_FINE.size (smaller triangles) and x FLAME_FINE.rate as many; height, base and black smoke unchanged
+  const S = FLAME_FINE.size, R = FLAME_FINE.rate
+  em.push(emit('fire', [0, P.flame * 0.27, 0], colBox(P.base, P.flame * 0.55), true, { size: 1.1 * S, rate: 3 * R, speed: 0.6, color: c, colorEnd: fireEnd, ...tw('fire') }, 2)) // the body of the fire
+  em.push(emit('fire', [0, P.flame * 0.72, 0], colBox(P.base * 0.65, P.flame * 0.45), true, { size: 0.9 * S, rate: 2.2 * R, speed: 0.6, color: c, colorEnd: fireEnd, ...tw('fire') }, 2)) // the top: narrower, to 15 m
   em.push(emit('crackle', [0, P.flame / 2, 0], colBox(P.base, P.flame), true, { size: 2.6, rate: 1.5, speed: 0.1, color: c, colorEnd: col2(c, 0), ...tw('crackle') }, 3))
-  for (const q of ringPts(P.base * 0.4, P.rim, 0.2)) em.push(emit('fire', q, coneUp('fire', 1.2), true, { size: 1.1, rate: 1.4, speed: 1.4, color: c, colorEnd: fireEnd, ...tw('rim') }, 4)) // flame tongues round the base, licking up to about 15 m
+  for (const q of ringPts(P.base * 0.4, P.rim, 0.2)) em.push(emit('fire', q, coneUp('fire', 1.2), true, { size: 1.1 * S, rate: 1.4 * R, speed: 1.4, color: c, colorEnd: fireEnd, ...tw('rim') }, 4)) // flame tongues round the base, licking up to about 15 m
   if (embers) em.push(emit('embers', [0, P.flame, 0], colBox(P.base, P.flame * 2), true, { rate: 1.5, speed: 0.6, color: COLORS_NEW.gold, ...tw('embers') }, 5))
   return em
 }
@@ -278,19 +286,24 @@ export function planEffect(id: string, p: PlanParams = {}, look?: LookData): Loo
         if (i > 0 && i < pts.length - 1) em.push(emit('fire', q, { kind: 'sphere', radius: 0.08 }, false, { size: 0.07, rate: 0.9, speed: 0.2, color: c, colorEnd: [c[0] * 0.5, c[1] * 0.3, 0, 0], ...tw('fire') }, 2))
       })
       em.push(emit('embers', [to[0] / 2, to[1] / 2 + 1.9 / 2, to[2] / 2], { kind: 'sphere', radius: 0.3 }, false, { size: 0.2, rate: 0.5, speed: 0.4, color: c, ...tw('embers') }, 3))
+      // c31c (Directive AA item 5): a champagne fizz that feels electrical: many small pale-yellow points along the charge shapes (the Glimpse's glow, smaller and
+      // more of them) that pop like bubbles: a short life (0.3 s), a quick grow (x 0.3 -> x 1.8 over the life), then gone. The box arcs and their colour stay.
+      for (const q of pts) { const z = emit('glow', q, { kind: 'sphere', radius: 0.22 }, false, { size: FIZZ.size, rate: FIZZ.rate, life: FIZZ.life, speed: 0.3, color: FIZZ.color, colorEnd: [FIZZ.color[0], FIZZ.color[1], FIZZ.color[2], 0], alpha: 2.8, ...tw('fizz') }, 4); z.sizeStart = 0.3; z.sizeEnd = 1.8; em.push(z) }
       break
     }
     case 'E3': { // Upgrade Drop: a column 3 m wide, 60 m tall, pink: fire at the foot, rising embers, a glow at the foot (3 emitters: the reserved budget)
       seconds = 60 * 60 * 3 // until a player collects it (the halo removes it when the server's list drops it)
       reserved = true
       // c30b: bigger, fuller pink fire, black smoke stacked up the 60 m column (5 emitters: the reserved budget is 6 x 5 = 30)
-      em.push(emit('fire', [0, 0, 0], coneUp('fire', 1.5), true, { size: 0.9, rate: 1.6, speed: 0.9, color: COLORS_NEW.pink, colorEnd: [0.6, 0.1, 0.4, 0.35], ...tw('fire') }, 1))
-      em.push(emit('embers', [0, 30, 0], colBox(3, 60), true, { rate: 1.2, speed: 0.6, color: COLORS_NEW.pink, ...tw('embers') }, 2))
-      em.push(emit('glow', [0, 0.5, 0], { kind: 'sphere', radius: 0.8 }, false, { size: 0.4, rate: 1.2, color: COLORS_NEW.pink, ...tw('glow') }, 3))
+      // c31c (Directive AA item 7): radius 1.5 m -> 1.05 m (2.1 m across, 30 % less, less obvious from far); the glow and fire at the foot scaled to match (x 0.7)
+      const DW = DROP_WIDTH, DK = DW / 3
+      em.push(emit('fire', [0, 0, 0], coneUp('fire', 1.5 * DK), true, { size: 0.9 * DK, rate: 1.6, speed: 0.9, color: COLORS_NEW.pink, colorEnd: [0.6, 0.1, 0.4, 0.35], ...tw('fire') }, 1))
+      em.push(emit('embers', [0, 30, 0], colBox(DW, 60), true, { rate: 1.2, speed: 0.6, color: COLORS_NEW.pink, ...tw('embers') }, 2))
+      em.push(emit('glow', [0, 0.5, 0], { kind: 'sphere', radius: 0.8 * DK }, false, { size: 0.4 * DK, rate: 1.2, color: COLORS_NEW.pink, ...tw('glow') }, 3))
       // c30f (Directive X item 3, baked): the smoke is pink at the base and fades to very pale pink at the top (two layers, same budget as the old 2-box stack)
       const PINK_MID: RGBA = [1, 0.62, 0.86, 0.9], PINK_PALE: RGBA = [1, 0.9, 0.96, 0.55]
-      em.push(emit('smoke', [0, 18, 0], colBox(3, 28), true, { size: 0.6, rate: 0.6, speed: 0.15, color: [1, 0.35, 0.75, 0.95], colorEnd: PINK_MID, ...tw('smoke') }, 4))
-      em.push(emit('smoke', [0, 46, 0], colBox(3, 28), true, { size: 0.6, rate: 0.6, speed: 0.15, color: PINK_MID, colorEnd: PINK_PALE, ...tw('smoke') }, 4))
+      em.push(emit('smoke', [0, 18, 0], colBox(DW, 28), true, { size: 0.6, rate: 0.6, speed: 0.15, color: [1, 0.35, 0.75, 0.95], colorEnd: PINK_MID, ...tw('smoke') }, 4))
+      em.push(emit('smoke', [0, 46, 0], colBox(DW, 28), true, { size: 0.6, rate: 0.6, speed: 0.15, color: PINK_MID, colorEnd: PINK_PALE, ...tw('smoke') }, 4))
       break
     }
     case 'E4': { // Discharge Trap: a small middle-grey box 0.2 m a side, a faint light-blue crackle within 0.5 m (visual only; the trap still triggers at 5 m)
@@ -351,13 +364,15 @@ export function planEffect(id: string, p: PlanParams = {}, look?: LookData): Loo
       em.push(...plasmaPortal(id, look, p.winner === 'helpers' ? COLORS_NEW.gold : COLORS_NEW.purple, false))
       break
     }
-    case 'E12': { // Glimpse Signal: a pale-cyan column 8 m wide from the ground to max height at the Synth's new starting spot (3 emitters), with a sound cue (game.ts). c30a: the c30 glow-only column was too thin to see (a 200 m column of ~200 faint glow particles); it now uses the E1 smoke density (the proven visible column) in pale cyan, plus a bright core
+    case 'E12': { // Glimpse Signal: a pale-cyan column (c31: 8 m wide, server key E12.width) from the ground to max height at the Synth's new starting spot (3 emitters), with a sound cue (game.ts). c30a: the c30 glow-only column was too thin to see (a 200 m column of ~200 faint glow particles); it now uses the E1 smoke density (the proven visible column) in pale cyan, plus a bright core
       seconds = f(p.seconds, 7)
       // c30b (Directive W): the look is LOCKED (pastel blue, as in the c30a test); three times as wide (8 -> 24 m) and three times the particles (three stacked smoke emitters at the c30a rate, the core and embers at three times the rate)
+      // c31 (Forces, mail f18278c7): 4 m radius (8 m across), tighter; the same particle counts, so it reads denser. The width is the server look key `E12.width` (2..30 m); the core stays width x 7.5/24, the embers fill the width
       big = true
-      em.push(...stack('ash', 24, 0, SKY_TOP, 3, { size: 0.9, rate: 2.2, speed: 0.25, color: COLORS_NEW.ghost, colorEnd: [COLORS_NEW.ghost[0], COLORS_NEW.ghost[1], COLORS_NEW.ghost[2], 0], alpha: 0.9, ...tw('glow') }, 1))
-      em.push(emit('glow', [0, SKY_TOP / 2, 0], colBox(7.5, SKY_TOP), true, { size: 0.5, rate: 9, life: 1.6, speed: 0.02, color: [0.85, 1, 1, 1], alpha: 1, ...tw('core') }, 2))
-      em.push(emit('embers', [0, SKY_TOP / 2, 0], colBox(24, SKY_TOP), true, { rate: 3.6, speed: 0.5, color: COLORS_NEW.ghost, ...tw('embers') }, 3))
+      const W = glimpseWidth(look)
+      em.push(...stack('ash', W, 0, SKY_TOP, 3, { size: 0.9, rate: 2.2, speed: 0.25, color: COLORS_NEW.ghost, colorEnd: [COLORS_NEW.ghost[0], COLORS_NEW.ghost[1], COLORS_NEW.ghost[2], 0], alpha: 0.9, ...tw('glow') }, 1))
+      em.push(emit('glow', [0, SKY_TOP / 2, 0], colBox(W * 7.5 / 24, SKY_TOP), true, { size: 0.5, rate: 9, life: 1.6, speed: 0.02, color: [0.85, 1, 1, 1], alpha: 1, ...tw('core') }, 2))
+      em.push(emit('embers', [0, SKY_TOP / 2, 0], colBox(W, SKY_TOP), true, { rate: 3.6, speed: 0.5, color: COLORS_NEW.ghost, ...tw('embers') }, 3))
       break
     }
     case 'E13': if (!as) return planBubble([0, 0, 0], f(p.r, BLAST_LOOK.radius), f(p.full, BLAST_LOOK.radius), look, f(p.seed, 13)); seconds = 12; break

@@ -108,9 +108,16 @@ test('c30b: the lobby bubble is 80 % and at most 30 m across; the burst grows fr
   }
 })
 
-test('c30b: the Glimpse keeps its colour and look, three times as wide and three times the particles', () => {
+test('c31c: the Glimpse keeps its colour, height and particles, 5.6 m across (2.8 m radius, Directive AA); the width is the server key E12.width (2..30 m)', () => {
   const g = plan('E12'), w = g.emitters.filter((e) => e.tex === 'wisp')
-  assert.ok(w.every((e) => box(e)!.x === 24)) // 8 -> 24 m
+  assert.ok(w.length === 3 && w.every((e) => box(e)!.x === 5.6)) // c31 (Forces): 24 -> 8 m; c31c (Directive AA): 8 -> 5.6 m
+  const core = g.emitters.find((e) => e.tex !== 'wisp' && e.rate > 5)!, emb = g.emitters[g.emitters.length - 1]!
+  assert.ok(Math.abs(box(core)!.x - 1.75) < 1e-9); assert.equal(box(emb)!.x, 5.6)
+  for (const [v, want] of [[16, 16], [1, 2], [99, 30], ['junk', 5.6]] as [any, number][]) {
+    const gw = plan('E12', {}, { 'E12.width': v })
+    assert.ok(gw.emitters.filter((e) => e.tex === 'wisp').every((e) => box(e)!.x === want), 'width ' + v)
+    assert.equal(parts(gw), parts(g)) // the width never changes the particle count
+  }
   const c30a = 2.2 * MATERIALS.ash.rate * MATERIALS.ash.lifetime // the c30a column (one emitter, 792 wanted, held to 600)
   assert.ok(parts(g) >= 3 * Math.min(600, Math.ceil(c30a)) + 3 * 48, 'particles ' + parts(g))
   assert.ok(w.every((e) => e.from[0] === COLORS_NEW.ghost[0] && e.from[2] === COLORS_NEW.ghost[2]))
@@ -160,4 +167,27 @@ test('c30c: any effect can be assigned an archetype from the server (<id>.as) an
   assert.equal(plan('E1', {}, { 'E1.as': 'nonsense' }).emitters.length, plan('E1').emitters.length) // unknown archetype: the effect's own recipe
   for (const id of EFFECT_IDS) for (const a of ARCHETYPES) { const p = plan(id, { r: 5 }, { [id + '.as']: a, [id + '.scale']: 99, [id + '.height']: 1e9 }); assert.ok(p.emitters.length <= LCAP.effectEmitters && p.emitters.every((e) => e.sizeMax <= LCAP.bigSize)) }
   assert.equal(archetype('X', 'E1', undefined).length, 0)
+})
+
+test('c31c (Directive AA 7): the Upgrade Drop column is 2.1 m across (1.05 m radius); its foot fire and glow are scaled x 0.7; still pink to pale pink', () => {
+  const d = plan('E3'), boxes = d.emitters.filter((e) => e.shape.kind === 'box')
+  assert.ok(boxes.length === 3 && boxes.every((e) => Math.abs(box(e)!.x - 2.1) < 1e-9), 'columns 2.1 m')
+  const fire = d.emitters.find((e) => e.shape.kind === 'cone')!, glow = d.emitters.find((e) => e.shape.kind === 'sphere')!
+  assert.ok(Math.abs((fire.shape as any).radius - 1.05) < 1e-9 && Math.abs((glow.shape as any).radius - 0.56) < 1e-9)
+  const w = d.emitters.filter((e) => e.tex === 'wisp').sort((x, y) => x.pos[1] - y.pos[1]); assert.ok(w[1]!.to[1] > w[0]!.to[1]) // paler at the top
+})
+test('c31c (Directive AA 5): the Plasma Charge fizz: small pale-yellow points along the charge line, a short life, they grow then go; the arcs stay', () => {
+  const c = plan('E2', { to: [0, 0, 4] }), fizz = c.emitters.filter((e) => e.tex === 'glow')
+  assert.ok(fizz.length >= 5, 'fizz points ' + fizz.length)
+  for (const z of fizz) { assert.ok(z.sizeMax <= 0.3 && z.lifetime <= 0.35 && z.sizeEnd > z.sizeStart * 4, 'pop'); assert.ok(z.from[0] > 0.9 && z.from[1] > 0.9 && z.from[2] < 0.7 && z.from[3] > 0.9, 'pale yellow'); assert.equal(z.to[3], 0) }
+  assert.ok(c.emitters.filter((e) => e.tex === 'crackle').length === 5, 'the box arcs stay')
+  assert.ok(fizz.reduce((a, e) => a + liveParticles(e), 0) > parts(plan('E12')) / 100, 'many')
+})
+test('c31c (Directive AA 8): portal flames are smaller and more of them; height, base and black smoke unchanged; still under the effect caps', () => {
+  for (const id of ['E7', 'E11', 'E14']) {
+    const p = plan(id), fire = p.emitters.filter((e) => e.tex === 'flipbook')
+    assert.ok(fire.length === 8 && fire.every((e) => e.sizeMax <= MATERIALS.fire.size[1] * 1.1 * 0.6 + 1e-9), id + ' smaller')
+    assert.ok(fire.every((e) => e.rate >= MATERIALS.fire.rate * 1.4 * 2 - 1e-9), id + ' more')
+    assert.ok(p.emitters.filter((e) => e.tex === 'wisp').length === 6 && parts(p) <= 9000, id + ' smoke + caps')
+  }
 })

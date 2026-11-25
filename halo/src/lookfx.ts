@@ -150,8 +150,9 @@ export class ChargeArcs {
     this.shown = false
     lookFx.remove('arcs')
   }
-  update(dt: number, me: Vec, synth: Vec | null, stage: string) {
+  update(dt: number, me: Vec, synth: Vec | null, stage: string, now?: number) {
     this.clk += dt
+    const at = now ?? this.clk // c31c fix: the particle skin is timed on the GAME clock (lookFx.update ends effects by it); the arcs' own clock lagged it, so every E2 skin ended the moment it was born (the 'small fire' was never seen)
     const inRange = !!synth && Math.hypot(me.x - synth.x, me.z - synth.z) <= 5
     if (!inRange) { this.hide(); return }
     this.ensure(); this.shown = true
@@ -177,7 +178,7 @@ export class ChargeArcs {
     }
     if (this.clk - this.last < 0.3) return
     this.last = this.clk
-    lookFx.effect('E2', me, this.clk, { to: [synth!.x - me.x, synth!.y - me.y, synth!.z - me.z], color: STAGE_COLORS[stage] ?? STAGE_COLORS.free }, 'arcs') // the fire skin
+    lookFx.effect('E2', me, at, { to: [synth!.x - me.x, synth!.y + 1 - me.y, synth!.z - me.z], color: STAGE_COLORS[stage] ?? STAGE_COLORS.free }, 'arcs') // the fire skin
   }
 }
 // ---------------------------------------------------------------- E3 upgrade drop
