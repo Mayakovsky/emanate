@@ -1,9 +1,9 @@
 # Build the halo zip for a given game server without committing the address (round 15).
-# usage: EMANATE_HALO_SERVER=https://<name> python halo-tools/build_halo.py   (default: the public server, https://emanate.hiddenforces.net)
+# usage: EMANATE_HALO_SERVER=https://<name> python halo-tools/build_halo.py   (default: the public server, https://ghostcode.hiddenforces.net)
 # It writes halo-build04/src/server-url.ts, builds and packs, then restores the committed default so nothing real is left in the tree.
 import os, subprocess, sys, hashlib
 HB = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'halo-build04')
-URL = os.environ.get('EMANATE_HALO_SERVER', 'https://emanate.hiddenforces.net')
+URL = os.environ.get('EMANATE_HALO_SERVER', 'https://ghostcode.hiddenforces.net')
 F = os.path.join(HB, 'src', 'server-url.ts')
 orig = open(F, encoding='utf8').read()
 try:

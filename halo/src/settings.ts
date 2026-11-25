@@ -6,7 +6,7 @@
 import { RULES } from './logic'
 
 export const PROTOCOL_VERSION = 1 // the command vocabulary and settings schema this halo understands
-export const BUILD_ID = 'c31f' // the halo build (set at release; the server logs it and may refuse an old one)
+export const BUILD_ID = 'c31g' // the halo build (set at release; the server logs it and may refuse an old one)
 
 // ---- the powers (index.ts) ----
 export const POWER = {
@@ -33,7 +33,7 @@ export const BLAST = { radius: 500, gravity: 10, riseGravity: 40, apexMin: 80, a
 export const FEATURES = { calls: 1, arrows: 0 /* c30f (Directive X item 4): arrows off by default, the code stays; the server can switch them back on */, plumes: 1, trap: 1, deadzoneWarn: 1, cinematics: 1, bubbleFx: 1, sounds: 1, debugPanel: 1, powers: 1, notes: 1, activeLine: 1, particles: 1, cues: 1, callNear: 0, blastBurst: 1 }
 // ---- text (HUD notes and the always-on line) ----
 export const TEXT: Record<string, string> = {
-  activeLine: 'GHOSTCODE halo active: sends your position to emanate.hiddenforces.net (see /privacy)',
+  activeLine: 'GHOSTCODE halo active: sends your position to ghostcode.hiddenforces.net (see /privacy)',
   joinPrompt: 'Pack your bags!'+String.fromCharCode(10)+'This could hurt a little.'+String.fromCharCode(10)+'Hold E for 1.5 seconds to join.',
   idle: '',
   refused: 'This Ghostcode halo is out of date.',
