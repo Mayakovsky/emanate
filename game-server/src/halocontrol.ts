@@ -85,7 +85,7 @@ export class HaloControl {
   /** The public state a sleeping halo asks for (no player data either way). */
   publicState(pv: number | undefined): Record<string, unknown> {
     const r = this.refusal(pv)
-    return r ? { refuse: true, message: r, sv: this.sv } : { idle: this.idle, sv: this.sv }
+    return r ? { refuse: true, message: r, sv: this.sv } : { idle: this.idle, sv: this.sv, settings: this.overrides } // c31c fix: the overrides travel WITH sv. A Halo polls this before it joins and takes sv from it; without the settings it then believed it was current and its ticks never asked for them (the server's text and look overrides never reached it). No player data: the same overrides every Halo gets
   }
   /** Remove a wearer's queue (the forget tool). */
   forget(pid: string) { this.queues.delete(pid.toLowerCase()); this.sawPlayers.delete(pid.toLowerCase()) }

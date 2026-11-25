@@ -265,7 +265,7 @@ test('c26 gate B: the bare check carries only the lobby and the bubble (no playe
     m.cfg = { ...m.cfg, lobbyEnabled: true } // the real server has the lobby on: a wearer not yet in the bubble only waits
     const bare = await (await fetch(url(port, '/halo/state?pv=1'))).json() as any
     assert.equal(bare.lobby, false); assert.equal(bare.bubble, null)
-    assert.deepEqual(Object.keys(bare).filter((k) => !['ok', 'idle', 'sv', 'lobby', 'bubble', 'refuse', 'message', 'blasts', 'call', 'trails', 'replay'].includes(k)), [])
+    assert.deepEqual(Object.keys(bare).filter((k) => !['ok', 'idle', 'sv', 'settings', 'lobby', 'bubble', 'refuse', 'message', 'blasts', 'call', 'trails', 'replay'].includes(k)), [])
     // no lobby and not in a match: a tick is answered but carries no lease
     const r1 = await (await tick(port, T('0x' + 'a'.repeat(40)))).json() as any
     assert.equal(r1.lease, undefined)

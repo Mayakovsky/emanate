@@ -36,7 +36,7 @@ test('the version policy refuses an old halo and serves the rest; a halo with no
   assert.equal(h.refusal(0), 'update'); assert.equal(h.refusal(undefined), 'update'); assert.equal(h.refusal(1), null)
   assert.deepEqual(h.publicState(0), { refuse: true, message: 'update', sv: 0 })
   h.policy.minPv = 0; h.idle = true
-  assert.deepEqual(h.publicState(1), { idle: true, sv: 0 })
+  assert.deepEqual(h.publicState(1), { idle: true, sv: 0, settings: {} }) // c31c: the overrides (none here) travel with sv
 })
 test('the tick keeps only the new fields in a safe form', () => {
   const t = cleanTick({ pid: A, pos: { x: 1, y: 2, z: 3 }, v: 'c23a', pv: 1, sv: 4, events: [] })!

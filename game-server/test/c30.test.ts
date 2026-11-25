@@ -3,11 +3,12 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { Match } from '../src/match.ts'
 import { CONFIG } from '../src/config.ts'
+import { HaloControl } from '../src/halocontrol.ts'
 
-function mk(extra: Partial<typeof CONFIG> = {}) {
+function mk(extra: Partial<typeof CONFIG> = {}, rngSeed = 3) {
   let t = 1_000_000
   const clock = { now: () => t, adv: (s: number) => (t += s * 1000) }
-  let seed = 3
+  let seed = rngSeed
   const rng = () => ((seed = (seed * 16807) % 2147483647) / 2147483647)
   const m = new Match({ now: clock.now, rng, cfg: { ...CONFIG, lobbyEnabled: true, lobbySeconds: 30, cinematics: true, cineFx: true, ...extra } })
   m.setSynth({ x: 100, y: 0, z: 100 })
@@ -21,8 +22,8 @@ function run(m: Match, clock: { adv: (s: number) => number }, seconds: number, p
 const evs = (m: Match, id: string) => (m.players.get(id)?.queue ?? []).map((e) => e.ev)
 const drain = (m: Match, id: string) => (m.players.get(id) ?? m.waiting.get(id))!.queue.splice(0)
 /** a solo game started through the lobby: player 'a' inside the bubble; runs to the end of the PP1 phase and the blast */
-function started(extra: Partial<typeof CONFIG> = {}) {
-  const { m, clock } = mk(extra)
+function started(extra: Partial<typeof CONFIG> = {}, rngSeed = 3) {
+  const { m, clock } = mk(extra, rngSeed)
   m.upsertPlayer('a', { pos: at(103, 100) })
   run(m, clock, 30, { a: { x: 103, z: 100 } })
   return { m, clock }
@@ -44,16 +45,77 @@ test('game start: the lobby bubble stays while PP1 stands in it; the blast, the 
   assert.deepEqual([g.x, g.z], [m.synth.x, m.synth.z]) // the signal marks the NEW spot
   assert.notDeepEqual([g.x, g.z], [old.x, old.z])
   assert.equal(g.seconds, 7)
-  assert.equal(m.drops.length, 6) // all of the round's drops exist from the start
+  assert.equal(m.drops.length, 6) // all of the round's drops exist from the start: 6 upgrades ...
+  assert.equal(m.traps.length, 6) // ... and beside them 6 armed world traps (roundTraps 6, Forces 24 Nov)
 })
 
 test('the drops of a round never exceed maxDrops, and the timed spawning is off', () => {
-  const { m, clock } = started({ maxDrops: 4 })
+  const { m, clock } = started({ maxDrops: 4, roundTraps: 0 })
   run(m, clock, 5, { a: { x: 103, z: 100 } })
   assert.equal(m.drops.length, 4)
   run(m, clock, 120, { a: { x: 103, z: 100 } })
   assert.ok(m.drops.length <= 4)
   assert.equal(m.dropsMade, 4)
+})
+
+test('c31: world traps sit BESIDE the upgrade drops: armed, no player’s, one use, a hit costs one level for exactly trapSeconds', () => {
+  const { m, clock } = started({ maxDrops: 6, roundTraps: 6 })
+  run(m, clock, 5, { a: { x: 103, z: 100 } })
+  assert.equal(m.drops.length, 6)
+  assert.equal(m.dropsMade, 6)
+  const world = m.traps.filter((t) => t.owner === 'server')
+  assert.equal(world.length, 6)
+  assert.ok(world.every((t) => t.exempt.size === 0)) // armed for everyone
+  run(m, clock, 200, { a: { x: 103, z: 100 } })
+  assert.equal(m.traps.filter((t) => t.owner === 'server').length, 6) // still there long after a placed trap would have expired
+  assert.ok(m.placeTrap('a', { x: 103, y: 0, z: 100 })) // the player can still place one of their own
+  const t = m.traps.find((x) => x.owner === 'server')!
+  const before = m.tierOf(m.players.get('a')!, clock.now())
+  m.upsertPlayer('a', { pos: { ...t.pos } }); m.advance()
+  const hitAt = clock.now()
+  assert.ok(!m.traps.some((x) => x.id === t.id)) // used up
+  assert.equal(m.players.get('a')!.trapUntil - hitAt, CONFIG.trapSeconds * 1000) // exactly trapSeconds
+  assert.equal(CONFIG.trapSeconds, 10); assert.equal(CONFIG.trapDelta, -1); assert.equal(CONFIG.trapRadius, 5)
+  assert.equal(m.tierOf(m.players.get('a')!, hitAt), Math.max(0, before - 1))
+  assert.equal(m.tierOf(m.players.get('a')!, hitAt + 10001), before) // back after 10 s
+})
+
+test('c31: world traps are spread: never near the Synth’s start, the lobby bubble, an upgrade drop or each other', () => {
+  for (let seed = 1; seed <= 25; seed++) {
+    const { m, clock } = started({ maxDrops: 6, roundTraps: 6 }, seed)
+    run(m, clock, 5, { a: { x: 103, z: 100 } })
+    const world = m.traps.filter((t) => t.owner === 'server'), R = CONFIG.trapRadius, [lo, hi] = CONFIG.dropSpawnMinMax
+    assert.equal(world.length, 6, 'seed ' + seed)
+    for (const t of world) {
+      const ds = Math.hypot(t.pos.x - m.synth.x, t.pos.z - m.synth.z)
+      assert.ok(ds >= lo - 0.01 && ds <= hi + 0.01 && ds > R + 10, 'on the ring, off the start: ' + ds)
+      for (const d of m.drops) assert.ok(Math.hypot(t.pos.x - d.pos.x, t.pos.z - d.pos.z) >= 2 * R + 2, 'off the drops')
+      for (const u of world) if (u !== t) assert.ok(Math.hypot(t.pos.x - u.pos.x, t.pos.z - u.pos.z) >= 2 * R + 2, 'apart')
+      if (m.bubble) assert.ok(Math.hypot(t.pos.x - m.bubble.x, t.pos.z - m.bubble.z) >= m.bubble.radius + R + 2, 'off the bubble')
+    }
+  }
+})
+
+test('c31: world traps are removed when the ending starts (none on PP2 or the replay portals) and at a lobby; a player’s own trap is not touched by the placing', () => {
+  const { m, clock } = started({ maxDrops: 6, roundTraps: 6 })
+  run(m, clock, 5, { a: { x: 103, z: 100 } })
+  assert.equal(m.traps.filter((t) => t.owner === 'server').length, 6)
+  ;(m as any).finish('hunters')
+  assert.equal(m.state, 'ending')
+  assert.equal(m.traps.filter((t) => t.owner === 'server').length, 0)
+  const { m: m2, clock: c2 } = started({ maxDrops: 6, roundTraps: 6 })
+  run(m2, c2, 5, { a: { x: 103, z: 100 } })
+  m2.startLobby()
+  assert.equal(m2.traps.filter((t) => t.owner === 'server').length, 0)
+})
+
+test('c31: roundTraps is clamped to 0..12 and never takes an upgrade drop’s place; junk gives none', () => {
+  for (const [rt, traps] of [[20, 12], [-2, 0], [Number.NaN, 0], [0, 0]] as [number, number][]) {
+    const { m, clock } = started({ maxDrops: 6, roundTraps: rt })
+    run(m, clock, 5, { a: { x: 103, z: 100 } })
+    assert.equal(m.drops.length, 6); assert.ok(m.traps.filter((t) => t.owner === 'server').length <= traps)
+    if (traps === 0) assert.equal(m.traps.length, 0)
+  }
 })
 
 function complete(m: Match, clock: { adv: (s: number) => number }) { // the solo player runs into the Synth
@@ -281,4 +343,13 @@ test('Directive Z fix: the first join in the lobby does not move the Synth (the 
   assert.deepEqual([m.synth.x, m.synth.z], [100, 100], 'the Synth stays where the bubble is')
   run(m, clock, 30, { a: { x: 103, z: 100 } })
   assert.equal(m.state, 'playing', 'the lobby ends normally with the player inside')
+})
+
+test('c31c fix: the bare halo state carries the settings with sv, so a Halo that polled it before joining still gets the overrides', () => {
+  const h = new HaloControl()
+  assert.deepEqual(h.publicState(1), { idle: false, sv: 0, settings: {} })
+  h.set({ text: { cueRound: 'Press 4 for a signal flare.' } })
+  const b = h.publicState(1) as any
+  assert.equal(b.sv, 1); assert.equal(b.settings.text.cueRound, 'Press 4 for a signal flare.')
+  assert.ok(!('players' in b) && !('you' in b))
 })
