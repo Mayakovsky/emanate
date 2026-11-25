@@ -43,7 +43,7 @@ export function playLib(name: string) {
   if (!e) {
     e = engine.addEntity()
     Transform.create(e, { position: Vector3.create(0, 0, 0) })
-    AudioSource.create(e, { audioClipUrl: `audio/${name}.wav`, playing: false, loop: false, volume: 0.6, global: true })
+    AudioSource.create(e, { audioClipUrl: `audio/${name}.wav`, playing: false, loop: false, volume: LEVEL_DEFAULT, global: true })
     libEntities.set(name, e)
   }
   AudioSource.getMutable(e).playing = false
@@ -53,16 +53,45 @@ export function initSounds() {
   for (const n of TONE_NAMES) {
     const e = engine.addEntity()
     Transform.create(e, { position: Vector3.create(0, 0, 0) })
-    AudioSource.create(e, { audioClipUrl: `audio/${n}.wav`, playing: false, loop: false, volume: 0.6, global: true })
+    AudioSource.create(e, { audioClipUrl: `audio/${n}.wav`, playing: false, loop: false, volume: LEVEL_DEFAULT, global: true })
     toneEntities.set(n, e)
   }
+}
+// ---- c31c (Directive AA items 2 to 4): one level per moment, and world sounds placed in the world ----
+// LEVEL: the AudioSource volume of each moment at closest range (0..1), from the measured mean loudness of its packed recording (ffmpeg volumedetect),
+// so the loudest two are breaking a charge and the blast crack and every other moment sits below them by importance (table + reasons in the c31c report).
+export const LEVEL: Record<string, number> = {
+  'blast.crack': 1.0, 'charge.broken': 0.41,                                                          // the loudest two (about -16.7 dB)
+  'charge.failed': 0.53, 'round.complete': 0.58, 'halo.discharge.trigger': 0.31, 'cine.rift.open': 0.245, // about -19 dB: a round's big moments
+  'glimpse.signal': 0.42, 'charge.contact': 0.42, 'charge.reset': 0.42, 'charge.repair': 0.42, 'charge.upgrade': 0.42, // Directive AA: 0.6 less 30 %
+  'round.timeout': 0.5, 'halo.upgrade_pickup': 0.75, 'halo.plume': 0.41, 'lobby.join': 1.0,          // about -20 to -21 dB
+  'role.double_agent': 0.45, 'warn.deadzone': 0.44, 'warn.upgrade': 0.77, 'round.start': 1.0, 'warn.five_minutes': 1.0, // about -22 dB: prompts
+  'halo.denied': 0.26, 'halo.discharge.set': 0.88, 'halo.boost_on': 0.6, 'replay.tick': 1.0,          // the quietest: small confirmations and long beds (c31e: boost_on = the 3 s ignition, about -21 dB)
+  'halo.boost.loop': 0.7                                                                              // c31e: the quiet booster loop under the boost, about -34 dB: under every other moment
+}
+export const LEVEL_DEFAULT = 0.25 // (tones measured to -7.8 dB mean: -19.8 dB here) a moment not in the table (placeholder tones, the library, a server remap to an unlisted slot): below every listed moment
+/** world sounds: played at their place in the world (the client lowers them with distance); every other moment is the player's own interface sound (same loudness everywhere) */
+export const SPATIAL = new Set(['blast.crack', 'cine.rift.open', 'glimpse.signal', 'halo.discharge.trigger', 'halo.discharge.set', 'halo.plume', 'halo.upgrade_pickup',
+  'charge.contact', 'charge.reset', 'charge.repair', 'charge.upgrade', 'charge.failed', 'charge.broken'])
+/** a moment with no recording of its own plays another moment's packed file (its own level and place): breaking a charge = the discharge zap, the loudest packed sound that fits a break */
+export const ALIAS: Record<string, string> = { 'charge.broken': 'halo.discharge.trigger' }
+export const levelOf = (id: string) => LEVEL[id] ?? LEVEL_DEFAULT
+/** c31e: an ear-free check: the slots in SOUND_TRACE report every start and stop (game.ts sends them to the test server's probe log) */
+export const SOUND_TRACE = new Set(['halo.boost_on', 'halo.boost.loop'])
+export let onSound: ((id: string, on: boolean) => void) | null = null
+export function setOnSound(f: ((id: string, on: boolean) => void) | null) { onSound = f }
+function packedFile(id: string): string | undefined { return PACKED[id] ?? (ALIAS[id] ? PACKED[ALIAS[id]!] : undefined) }
+function placeSound(e: Entity, id: string, at?: Vec) {
+  const a = AudioSource.getMutable(e)
+  a.volume = levelOf(id)
+  if (at && SPATIAL.has(id)) { a.global = false; Transform.getMutable(e).position = Vector3.create(at.x, at.y, at.z) } else a.global = true
 }
 function slotEntity(id: string, url: string): Entity {
   let e = slotEntities.get(id)
   if (!e) {
     e = engine.addEntity()
     Transform.create(e, { position: Vector3.create(0, 0, 0) })
-    AudioSource.create(e, { audioClipUrl: url, playing: false, loop: !!SLOT_LOOP[id], volume: 0.6, global: true })
+    AudioSource.create(e, { audioClipUrl: url, playing: false, loop: !!SLOT_LOOP[id], volume: LEVEL_DEFAULT, global: true })
     slotEntities.set(id, e)
   } else if (AudioSource.get(e).audioClipUrl !== url) AudioSource.getMutable(e).audioClipUrl = url
   return e
@@ -77,11 +106,11 @@ export function slotSource(id: string): 'server' | 'packed' | 'tone' | 'silent' 
   // c30f: the packed file comes FIRST. A wearable's AudioSource does not load a clip from a web address (23 Nov: the client never fetched a
   // server file, the recording stayed silent), so a server recording is used only for a slot with nothing packed. The server's remap (SOUNDS)
   // still points any moment at any packed slot, and that stays changeable after the Mint Lock.
-  if (PACKED[id]) return 'packed'
+  if (packedFile(id)) return 'packed'
   if (remoteAudio[id]) return 'server'
   return toneOf.get(id) ? 'tone' : 'silent'
 }
-export function playSlot(id0: string) {
+export function playSlot(id0: string, at?: Vec) { // c31c: `at` = where a world sound happens (the scene's local position); without it every sound is the player's own
   if ((FEATURES as Record<string, number>).sounds === 0) return
   // round 23: the server may remap which sound an event plays ("" = silent, "lib:<name>" = a tone of the library in the zip)
   const id = SOUNDS[id0] ?? id0
@@ -98,10 +127,12 @@ export function playSlot(id0: string) {
     slotEntity(id, remoteAudio[id]!)
   } else if (src === 'packed') {
     key = 's:' + id
-    slotEntity(id, 'audio/' + PACKED[id]!)
+    slotEntity(id, 'audio/' + packedFile(id)!)
   } else key = 't:' + toneOf.get(id)!
   const e = key.startsWith('s:') ? slotEntities.get(id) : toneEntities.get(toneOf.get(id)!)
   if (!e) return
+  placeSound(e, id, at)
+  if (onSound && SOUND_TRACE.has(id)) onSound(id, true)
   AudioSource.getMutable(e).playing = false
   armed.add(key + '|' + id)
 }
@@ -113,10 +144,11 @@ export function stopSlot(id0: string) {
   stopAt.delete(id)
   for (const k of [...armed]) if (k.endsWith('|' + id) && k.startsWith('s:')) armed.delete(k)
   const e = slotEntities.get(id); if (e) AudioSource.getMutable(e).playing = false
+  if (onSound && SOUND_TRACE.has(id)) onSound(id, false)
 }
 /** play a slot and stop it after `seconds` (its moment's length) */
-export function playSlotFor(id0: string, seconds: number) {
-  playSlot(id0)
+export function playSlotFor(id0: string, seconds: number, at?: Vec) {
+  playSlot(id0, at)
   const id = resolveSlot(id0); if (!id || !(seconds > 0)) return
   stopAt.set(id, Date.now() + Math.min(120, seconds) * 1000)
 }

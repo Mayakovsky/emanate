@@ -33,6 +33,7 @@ export const SLOT_TABLE: [string, string | null][] = [
   ['halo.plume', 'plume'],
   ['halo.upgrade_pickup', 'upgrade'],
   ['halo.boost_on', 'upgrade'],
+  ['halo.boost.loop', null],
   ['halo.arrow_overload', 'overload'],
   ['blast.crack', 'crackle'],
   ['halo.denied', 'nokey'],
@@ -54,4 +55,4 @@ export const SLOT_TABLE: [string, string | null][] = [
   ['end.portal.contain.pull', null],
   ['replay.tick', null]
 ]
-export const SLOT_LOOP: Record<string, boolean> = { 'cine.rift.open': true, 'cine.aurora.ambient': true, 'cine.carrington.storm': true, 'end.plume.rise': true, 'end.portal.escape.open': true, 'end.portal.contain.open': true }
+export const SLOT_LOOP: Record<string, boolean> = { 'halo.boost.loop': true, 'cine.rift.open': true, 'cine.aurora.ambient': true, 'cine.carrington.storm': true, 'end.plume.rise': true, 'end.portal.escape.open': true, 'end.portal.contain.open': true }

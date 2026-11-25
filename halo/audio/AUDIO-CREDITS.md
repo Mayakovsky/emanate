@@ -3,7 +3,7 @@
 Edited by Hidden Forces from the Freesound sources below. Licenses were read from each source page on 23 Nov 2026.
 - **CC BY 4.0, attribution required:** "Horn on 1979 Mercury Zephyr Sedan" by j_soundeffects (halo_denied), and "dun dun dun synth.wav" by FreqMan (role_double_agent).
 - **Everything else:** CC0 1.0, or Hidden Forces's own recordings.
-- **The blast crack** (blast_crack) uses only its three CC0 layers.
+- **The blast crack** (blast_crack, 8 s) uses only its three CC0 layers.
 
 | File (slot) | Source sound | Author | License | Link |
 |---|---|---|---|---|
@@ -29,7 +29,8 @@ Edited by Hidden Forces from the Freesound sources below. Licenses were read fro
 | charge_failed.wav (charge.failed) | MA_SFX_MiscPack_1_11.wav | DneproMan | CC0 1.0 | https://freesound.org/people/DneproMan/sounds/334860/ |
 | halo_plume.wav (halo.plume) | MA_SFX_8bit_Shoot_7.wav (reversed) | DneproMan | CC0 1.0 | https://freesound.org/people/DneproMan/sounds/334896/ |
 | halo_upgrade_pickup.wav (halo.upgrade_pickup) | MA_SFX_Sparkomat_12.wav | DneproMan | CC0 1.0 | https://freesound.org/people/DneproMan/sounds/334810/ |
-| halo_boost_on.wav (halo.boost_on) | ROCKET BOOSTER RAW EDITABLE.WAV | metrostock99 | CC0 1.0 | https://freesound.org/people/metrostock99/sounds/203264/ |
+| halo_boost_on.wav (halo.boost_on: 3 s ignition) | ROCKET BOOSTER RAW EDITABLE.WAV | metrostock99 | CC0 1.0 | https://freesound.org/people/metrostock99/sounds/203264/ |
+| halo_boost_loop.wav (halo.boost.loop: quiet loop under the boost) | ROCKET BOOSTER RAW EDITABLE.WAV (steady middle, looped) | metrostock99 | CC0 1.0 | https://freesound.org/people/metrostock99/sounds/203264/ |
 | halo_denied.wav (halo.denied) | Horn on 1979 Mercury Zephyr Sedan | j_soundeffects | **CC BY 4.0 (attribution)** | https://freesound.org/people/j_soundeffects/sounds/635998/ |
 | halo_discharge_set.wav (halo.discharge.set) | Laser Zaps.wav (quiet) | Glitchedtones | CC0 1.0 | https://freesound.org/people/Glitchedtones/sounds/375926/ |
 | halo_discharge_trigger.wav (halo.discharge.trigger) | Laser Zaps.wav (loud) | Glitchedtones | CC0 1.0 | https://freesound.org/people/Glitchedtones/sounds/375926/ |

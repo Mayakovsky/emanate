@@ -11,7 +11,7 @@ import { planBlast, bubbleScale } from './blastplan'
 import { skyUpdate, skyText, skyStart } from './sky'
 import { openDialog, closeDialog, setDialogClock, dialog } from './dialog'
 import { planParticles } from './particleplan'
-import { ParticleFx, playLib, Arrows, Plumes, ChargeArcs, DropMarkers, TrapMarkers, BubbleFx, TestMarkers, DistanceMarkers, MARKER_COLOR_NAMES, MARKER_DISTANCES, initSounds, playSlot, playSlotFor, stopSlot, playSound, soundsUpdate, setRemoteAudio, audioStats, slotSource } from './fx'
+import { ParticleFx, playLib, Arrows, Plumes, ChargeArcs, DropMarkers, TrapMarkers, BubbleFx, TestMarkers, DistanceMarkers, MARKER_COLOR_NAMES, MARKER_DISTANCES, initSounds, playSlot, playSlotFor, stopSlot, setOnSound, playSound, soundsUpdate, setRemoteAudio, audioStats, slotSource } from './fx'
 import { consent, optOut, paused, setPaused, leaseValid, bare, bareFx, grantConsent, doOptOut } from './net'
 import { idle, setIdle, refetchSettings, cmdQueue, settingsInfo, refusedNote, emit, netUpdate, sendGameEvent, serverState, serverUp, lastErr, netStatus, lastGameError, manifestUpdate, manifestInfo } from './net'
 import { cueKeyFor } from './uiplan'
@@ -124,6 +124,8 @@ function identify() {
 }
 
 // ---- helpers ----
+/** c31c: the Synth's place in the scene's local space, for a charge sound (undefined = play it as the player's own) */
+function synthLocal(): Vec | undefined { const s = synthPos(); return s ? toLocal(s) : undefined }
 function synthPos(): Vec | null {
   if (mode === 'server') {
     const s = serverState?.synth
@@ -164,7 +166,7 @@ export function gamePlaceTrap() {
     }
     sendGameEvent({ ev: 'trap' })
     emit('trap', { sent: true, mode })
-    playSlot('halo.discharge.set') // c30d: the quiet zap of placing the trap
+    playSlot('halo.discharge.set', curMe) // c30d: the quiet zap of placing the trap (c31c: at the trap)
     note(say('trapPlaced'))
     return
   }
@@ -176,7 +178,7 @@ export function gamePlaceTrap() {
   }
   testTrap = { pos: { ...world }, exempt: true }
   emit('trap', { sent: true, mode })
-  playSlot('halo.discharge.set')
+  playSlot('halo.discharge.set', curMe)
   note('Discharge Trap placed (test mode)')
 }
 
@@ -293,8 +295,8 @@ export function gameUpdate(dt: number, me: Vec, speed: number, airborne: boolean
       if (gone <= testClock && Math.hypot(world.x - d.pos.x, world.z - d.pos.z) <= RULES.pickupRadius) {
         testDropsGone.set(d.id as string, testClock + 30)
         testBoostUntil = testClock + RULES.boostSeconds // a Halo boost applies the moment it is picked up
-        playSlot('halo.upgrade_pickup')
-        playSlotFor('halo.boost_on', RULES.boostSeconds) // c30d: stops when the boost ends
+        playSlot('halo.upgrade_pickup', curMe)
+        boostSound(RULES.boostSeconds)
         emit('pickup', { id: d.id, mode })
         note('Halo boost: ' + RULES.boostSeconds + ' s')
       }
@@ -396,18 +398,19 @@ export function gameUpdate(dt: number, me: Vec, speed: number, airborne: boolean
   const sp = synthPos() ?? nearest(world, testSynths())?.target.pos ?? null
   if (contactFx && clock >= contactFx.until) contactFx = null
   // charging effect: within 5 m of the Synth, or for 1.5 s after the server reports a contact there (a contact can end the round at once)
-  arcs.update(dt, world, contactFx ? contactFx.pos : sp, contactFx ? contactFx.stage : mode === 'server' ? serverState?.synth?.stage ?? 'free' : 'free')
+  arcs.update(dt, world, contactFx ? contactFx.pos : sp, contactFx ? contactFx.stage : mode === 'server' ? serverState?.synth?.stage ?? 'free' : 'free', clock)
   if ((sp && dist(world, sp) <= RULES.chargeRadius) || contactFx) {
     if (!charging) {
       charging = true
-      playSlot('charge.contact')
+      playSlot('charge.contact', toLocal(contactFx ? contactFx.pos : sp!)) // c31c: at the Synth
       emit('charging', { d: sp ? dist(world, sp) : null, stage: mode === 'server' ? serverState?.synth?.stage : 'test' })
     }
-  } else charging = false
+  } else { if (charging) for (const id of CHARGE_SLOTS) stopSlot(id); charging = false } // c31d (Forces): no charge sound outlasts the arcs: they stop the moment the arcs go
   frameUpdate(dt)
   manifestUpdate(dt, setRemoteAudio)
   setDialogClock(clock)
   dialogSync()
+  boostSoundUpdate(mode === 'server' ? serverState?.you?.boostLeft ?? 0 : Math.max(0, testBoostUntil - testClock))
   soundsUpdate()
   skyUpdate(clock, mode === 'test')
 
@@ -423,6 +426,11 @@ let lastAirborne = false
 let prevMe: Vec | null = null
 let velSmooth: Vec = { x: 0, y: 0, z: 0 }
 let charging = false
+// c31e (Forces, option 3): the boost = a 3 s ignition burst once, plus a quiet loop under the whole boost that stops exactly when the boost ends (the wearer's own: not spatial)
+let boostLoopOn = false, boostLoopFrom = 0
+function boostSound(seconds: number) { playSlot('halo.boost_on'); playSlotFor('halo.boost.loop', seconds); boostLoopOn = true; boostLoopFrom = clock }
+function boostSoundUpdate(boostLeft: number) { if (boostLoopOn && clock - boostLoopFrom > 1.5 && boostLeft <= 0) { stopSlot('halo.boost.loop'); boostLoopOn = false } } // the boost ended early (or the timer drifted): the loop goes with it
+const CHARGE_SLOTS = ['charge.contact', 'charge.reset', 'charge.repair', 'charge.upgrade', 'charge.failed', 'charge.broken'] // c31d: the sounds that belong to the arcs
 let contactFx: { pos: Vec; until: number; stage: string } | null = null
 
 function livePos(t: Target): Vec | null {
@@ -511,7 +519,7 @@ function keyPlume(world: Vec) {
   const id = mode === 'server' ? 'own-' + Math.floor(clock * 100) : testPlumeId++
   ownPlumes.set(id, { base: world, born: clock })
   plumes.spawn(id, toLocal(world), 0, clock)
-  playSlot('halo.plume')
+  playSlot('halo.plume', toLocal(world)) // c31c: at the flare
   emit('plume', { sent: true, pos: world, mode })
   note(say('plumeSent'))
 }
@@ -531,7 +539,7 @@ function syncTraps(me: Vec, world: Vec) {
       testTrap = null
       note('Discharge Trap hit you: one level down for ' + RULES.trapSeconds + ' s')
       emit('trap-hit', { mode, self: true })
-      playSlot('halo.discharge.trigger')
+      playSlot('halo.discharge.trigger', curMe)
     }
   }
   trapMarks.update(clock, testTrap ? [{ id: 'test', pos: toLocal(testTrap.pos), mine: true }] : [])
@@ -554,6 +562,7 @@ function syncBubble(dt: number, me: Vec, world: Vec) {
 }
 
 // ---- trace reports: each goes to the console log and (with the server up) to the server's log ----
+setOnSound((id, on) => traceReport('snd', { id, on, t: Math.round(clock * 100) / 100, boostLeft: Math.round((serverState?.you?.boostLeft ?? -1) * 100) / 100 })) // c31e: the ear-free check of the boost sounds (test builds only: traceReport sends nothing in the final)
 function traceReport(what: string, data: Record<string, unknown>) {
   emit('trace', { what, ...data })
   // Directive Y item 5: the trace upload is test-only diagnostics (the server's halo-probes file); the final build (FINAL_NO_TEST_POWERS on) never sends it
@@ -575,7 +584,7 @@ let lastCallSeq = 0, callCooldownUntil = 0
 let portal: { at: Vec; until: number; radius: number } | null = null
 /** c27 (Directive M): the blast's look = a crack (slot blast.crack), one short white flash, and the red fiery bubble that grows from the launch point (67 % opaque, soft ease) and fades; nothing else */
 function blastLook(at: Vec) {
-  playSlot('blast.crack')
+  playSlot('blast.crack', at) // c31c (Directive AA 1, 4): the 8 s crack at the launch point, played out in full (no stop)
   flashUntil = clock + BLAST.flashSeconds
   blastBub = { t0: clock, at: { ...at } }
   spawnBub(at, clock)
@@ -877,17 +886,17 @@ function handleServerEvent(ev: any) {
       restoredNote = `restored from the server: round ${ev.round}, plumes ${ev.plumesLeft}`
       restoredUntil = clock + 15
       break
-    case 'charge-failed': note('charge failed'); playSlot('charge.failed'); break
-    case 'charge-broken': note('charge broken by the other side'); playSlot('charge.broken'); break
-    case 'stage': note(`Synth ${ev.stage} mode`); playSlot(ev.stage === 'repair' ? 'charge.repair' : ev.stage === 'upgrade' ? 'charge.upgrade' : 'charge.reset'); break
-    case 'pickup': playSlot('halo.upgrade_pickup'); if (ev.kind === 'boost') playSlotFor('halo.boost_on', Math.max(1, Math.min(120, num2(ev.seconds, RULES.boostSeconds)))) /* c30d: the boost sound, until the boost ends */; note(ev.kind === 'boost' ? 'Halo boost: 30 s (applied now)' : `picked up ${ev.kind}`); break
+    case 'charge-failed': note('charge failed'); playSlot('charge.failed', synthLocal()); break
+    case 'charge-broken': note('charge broken by the other side'); playSlot('charge.broken', synthLocal()); break
+    case 'stage': note(`Synth ${ev.stage} mode`); playSlot(ev.stage === 'repair' ? 'charge.repair' : ev.stage === 'upgrade' ? 'charge.upgrade' : 'charge.reset', synthLocal()); break
+    case 'pickup': playSlot('halo.upgrade_pickup', curMe); if (ev.kind === 'boost') boostSound(Math.max(1, Math.min(120, num2(ev.seconds, RULES.boostSeconds)))) /* c30d: the boost sound, until the boost ends */; note(ev.kind === 'boost' ? 'Halo boost: 30 s (applied now)' : `picked up ${ev.kind}`); break
     case 'lobby': cue('lobby'); lobbyNote = `LOBBY: everyone into the bubble (${Math.round(ev.seconds)} s)`; note(say('lobbyCall')); playSlot('warn.upgrade'); break
     case 'lobby-end': lobbyNote = ''; note(say('lobbyEnd', { mode: ev.mode, count: ev.count })); break // c30: PP1 comes as its own event; the E6 burst plays with the blast
     case 'lobby-wait': lobbyNote = 'waiting for the next lobby'; note('the game started without you: you wait for the next lobby'); break
     case 'teleport': serverTeleport(ev); break
     case 'blast': runCommand({ ...ev, c: 'blast', mix: 1 }); break
     case 'toss': runCommand({ c: 'lift', altitude: Number(ev.altitude) || 100 }); traceReport('toss-event', { round: ev.round, altitude: ev.altitude }); break
-    case 'trap-hit': playSlot('halo.discharge.trigger'); note(ev.synth ? 'Discharge Trap hit the Synth' : 'Discharge Trap went off'); emit('trap-hit', { x: ev.x, z: ev.z, synth: ev.synth, players: ev.players }); break
+    case 'trap-hit': playSlot('halo.discharge.trigger', evPos(ev) ?? curMe); note(ev.synth ? 'Discharge Trap hit the Synth' : 'Discharge Trap went off'); emit('trap-hit', { x: ev.x, z: ev.z, synth: ev.synth, players: ev.players }); break
     case 'double-agent': note('you were recruited as a double agent'); playSlot('role.double_agent'); break
   }
 }
@@ -918,14 +927,14 @@ function portalEvent(ev: any) {
   const secs = Math.max(1, Math.min(60, num2(ev.seconds, 5)))
   if (ev.v === 2) lookFx.effect('E11', at, clock, { seconds: secs, winner: ev.side === 'helpers' ? 'helpers' : 'hunters' }, 'pp2') // PP2 in the winner's colour
   else lookFx.effect('E7', at, clock, { seconds: secs + 0.5 }, 'pp1') // PP1
-  playSlotFor('cine.rift.open', ev.v === 2 ? secs : secs + 0.5) // c30d: the hum stops when the portal closes
+  playSlotFor('cine.rift.open', ev.v === 2 ? secs : secs + 0.5, at) // c30d: the hum stops when the portal closes
   note(ev.v === 2 ? 'the Synth is gone into the portal: ' + (ev.side === 'helpers' ? 'helpers win' : 'hunters win') : 'the Synth steps into the portal: the blast follows')
 }
 function glimpseSignal(ev: any) {
   const at = evPos(ev); if (!at || !feature('particles')) return
   const gsecs = Math.max(1, Math.min(30, num2(ev.seconds, 7)))
   lookFx.effect('E12', at, clock, { seconds: gsecs }, 'glimpse') // the Synth's NEW starting spot: a pale-cyan column to max height
-  playSlotFor('glimpse.signal', gsecs) // c30d: stops when the Glimpse ends // c30d: its own slot (was the spare cine.rift.snap)
+  playSlotFor('glimpse.signal', gsecs, at) // c30d: stops when the Glimpse ends // c30d: its own slot (was the spare cine.rift.snap)
   emit('glimpse-signal', { seconds: ev.seconds })
 }
 
