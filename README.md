@@ -4,7 +4,7 @@
 
 - **The city is the board.** No parcels are rented or built. The Synth goes anywhere a player can: into buildings, up to rooftops, gliding off high points.
 - **A real avatar as the Synth.** It is a logged-in avatar driven by our AI, not a scene prop.
-- **The halo carries the game.** One wearable, free to every player: a ring of coloured dots points toward what you track, and three tiers of powers stack as you capture the Synth — **Sprint**, then **Jump** (double jump and glide), then **Fly**.
+- **The halo carries the game.** One wearable, free to every player: all effects built inside, three tiers of powers stack as you capture the Synth — **Sprint**, then **Jump** (double jump and glide), then **Fly**.
 - **Other people's land is part of the game.** Scenes that block smart wearables become dead zones to hide in; scenes with their own movement rules interfere at random.
 
 The full design is in [`design/gdd.md`](design/gdd.md), written to DCL's Creator Success GDD template.
@@ -15,7 +15,6 @@ Core-mechanic prototype on **Zone** (DCL's staging copy of the city):
 
 - Halo movement powers: sprint, jump, double jump, glide and flight work and are tuned. **Controls version 1** is the current baseline; its values and measured results are in the GDD, Appendix C.
 - The Synth runs as a real avatar on a headless client (see below) and collides with real buildings.
-- Tracking dots and effects (the next build) are not built yet.
 
 ## Repo map
 
