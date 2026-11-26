@@ -21,7 +21,7 @@ The full design is in [`design/gdd.md`](design/gdd.md), written to DCL's Creator
 1. **Join.** The Synth calls players into a glowing bubble ("Everyone into the bubble!"). Walk in and hold `E`. Players far away can join through a red portal that appears near them.
 2. **Blast.** Everyone who joined is thrown high into the sky on a smoke trail and glides down somewhere new.
 3. **Hunt.** A tall pale-cyan column, the **Glimpse**, shows where the Synth now stands. Race there.
-4. **Charge.** Get within 5 m of the Synth three times in a row, each within 10 s of the last. It slows, freezes, and a portal swallows it. Round won.
+4. **Charge.** Get within 5 m of the Synth. Solo, one touch charges it. In a group, the touches must come from different players on your side (three, or your whole side if it is smaller), each within 10 s of the last: the Synth slows, then freezes. A portal swallows it. Round won.
 5. **Replay.** After three rounds, the final portal takes the winning side's colour. Two replay portals stand for ten seconds, purple for Hunters and gold for Helpers: walk into one to pick your side for the next game.
 
 | Mode | Players | How it plays |
