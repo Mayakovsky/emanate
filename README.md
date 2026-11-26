@@ -1,6 +1,6 @@
 # Ghostcode
 
-**Hide-and-seek across all of Decentraland's Genesis City.** An AI-run avatar, the **Synth**, hides and runs. Players hunt it with a free smart wearable, the **halo**, which gives them tracking dots and stacking movement powers. Play solo, as a group, or in teams. *(Ghostcode was called Emanate while in development.)*
+**Hide-and-seek across all of Decentraland's Genesis City.** An AI-run avatar, the **Synth**, hides and runs. Players hunt it with a free smart wearable, the **halo**, which gives them tracking dots and stacking movement powers. Play solo, as a group, or in teams.
 
 - **The city is the board.** No parcels are rented or built. The Synth goes anywhere a player can: into buildings, up to rooftops, gliding off high points.
 - **A real avatar as the Synth.** It is a logged-in avatar driven by our AI, not a scene prop.
