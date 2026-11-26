@@ -6,7 +6,7 @@
 - **A real avatar as the Synth.** It is a logged-in avatar named "Synth (AI)", driven by our server, not a scene prop. It runs, hides on high or low ground, and glides away.
 - **The Halo carries the game.** One wearable, free to every player. All effects and sounds are packed inside it. Each round raises everyone's power: **Sprint**, then **Jump** (double jump and glide), then **Fly**.
 - **A stock avatar until you choose to play.** The Halo changes nothing and sends nothing about you until you step into the game's bubble and hold `E`.
-- **Other people's land is part of the game.** Scenes that block smart wearables become dead zones; the Halo warns you before you reach one.
+- **Other people's land is part of the game.** Scenes that block smart wearables become dead zones; the Halo warns you automatically before you reach one.
 
 The full design is in [`design/gdd.md`](design/gdd.md), written to DCL's Creator Success GDD template.
 
@@ -27,7 +27,7 @@ The full design is in [`design/gdd.md`](design/gdd.md), written to DCL's Creator
 | Mode | Players | How it plays |
 |---|---|---|
 | **Solo** | 1 | You chase the Synth alone across three rounds. |
-| **Co-op** | 2–5 | Everyone on one side; spread out and guide each other with flares and arrows. |
+| **Co-op** | 2–5 | Everyone on one side; spread out and guide each other with Signal Flares. |
 | **Multiplayer** | 6+ | Hunters against Helpers, at least 3 a side, balanced automatically. Arriving while the other side is charging breaks their charge. |
 
 ## Keys
@@ -36,9 +36,6 @@ The full design is in [`design/gdd.md`](design/gdd.md), written to DCL's Creator
 |---|---|
 | `E` (in the bubble, hold) | Join the game |
 | `E` (in a game) | Place a Discharge Trap: anyone who comes within 5 m drops a power level for 10 s (it skips the player who placed it) |
-| `1` | Red arrow towards the Synth |
-| `2` | Pink arrow to the nearest upgrade drop |
-| `3` | Dead-zone warnings on or off |
 | `4` | Signal Flare: a plume in the sky where you stand, so others can find the spot |
 | `Space` in the air | Open your glider |
 | `Ctrl` + `Shift` + `E` | Pause; hold 3 s to leave for good |
